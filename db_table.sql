@@ -13,7 +13,7 @@ $do$;
 create table if not exists public.stocks (
   id bigserial primary key,
   symbol varchar(20) not null,
-  name varchar(100) not null,
+  name text not null,
   market public.market_type not null,
   is_active boolean not null default true,
   created_at timestamptz not null default now(),

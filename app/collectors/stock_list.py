@@ -66,14 +66,13 @@ class StockListCollector:
 
     def _parse_kr(self, data: bytes, market: Market) -> list[StockInfo]:
         stocks = []
-        lines = data.decode("cp949", errors="ignore").splitlines()
 
-        for line in lines:
-            if len(line) < 32:
+        for line in data.split(b"\n"):
+            if len(line) < 61:
                 continue
 
-            symbol = line[0:9].strip()
-            name = line[21:].split("\x00")[0].strip()
+            symbol = line[0:9].decode("cp949", errors="ignore").strip()
+            name = line[21:61].decode("cp949", errors="ignore").strip()
 
             if not symbol or not name:
                 continue
@@ -89,12 +88,12 @@ class StockListCollector:
         lines = data.decode("cp949", errors="ignore").splitlines()
 
         for line in lines:
-            parts = line.split("|")
-            if len(parts) < 2:
+            parts = line.split("\t")
+            if len(parts) < 8:
                 continue
 
-            symbol = parts[0].strip()
-            name = parts[1].strip()
+            symbol = parts[4].strip()
+            name = parts[7].strip()
 
             if not symbol or not name:
                 continue
@@ -106,7 +105,7 @@ class StockListCollector:
         return stocks
 
     def _is_invalid_kr_stock(self, symbol: str, name: str) -> bool:
-        if not symbol[0].isdigit():
+        if not symbol.isdigit():
             return True
         return any(kw in name for kw in KR_INVALID_KEYWORDS)
 
