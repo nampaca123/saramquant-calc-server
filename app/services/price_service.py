@@ -5,7 +5,7 @@ import pandas as pd
 from psycopg2.extensions import connection
 
 from app.db.repository import StockRepository, DailyPriceRepository
-from app.api.errors import NotFoundError
+from app.api.system.errors import NotFoundError
 
 
 class PriceService:

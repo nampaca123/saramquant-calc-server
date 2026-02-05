@@ -1,5 +1,5 @@
 from flask import Flask
-from app.api.errors import register_error_handlers
+from app.api.system.errors import register_error_handlers
 
 
 def create_app() -> Flask:

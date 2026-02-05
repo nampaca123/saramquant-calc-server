@@ -1,7 +1,6 @@
 from flask import request, jsonify
 
-from app.api import api_bp
-from app.api.errors import APIError
+from app.api import api_bp, APIError
 from app.db.connection import get_connection
 from app.services import RiskService
 from app.schema import Benchmark

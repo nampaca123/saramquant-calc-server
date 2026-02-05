@@ -1,8 +1,6 @@
 from flask import request, jsonify
 
-from app.api import api_bp
-from app.api.errors import NotFoundError
-from app.api.utils import parse_market
+from app.api import api_bp, NotFoundError, parse_market
 from app.db.connection import get_connection
 from app.db.repository import StockRepository
 
