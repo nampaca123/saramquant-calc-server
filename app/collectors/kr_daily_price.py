@@ -1,7 +1,7 @@
 import logging
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
-from app.schema import DailyPrice, Market
+from app.schema import Market
 from app.db import get_connection, StockRepository, DailyPriceRepository
 from app.collectors.clients import PykrxClient
 
@@ -41,7 +41,7 @@ class KrDailyPriceCollector:
             logger.warning(f"[KrDailyPrice] No active stocks for {market.value}")
             return {}
 
-        last_date = self._get_market_last_date(stock_map)
+        last_date = self._get_market_last_date(market)
         dates = self._generate_dates(last_date)
         if not dates:
             logger.info(f"[KrDailyPrice] {market.value} already up to date")
@@ -49,7 +49,7 @@ class KrDailyPriceCollector:
 
         logger.info(f"[KrDailyPrice] {market.value}: collecting {len(dates)} days")
 
-        results: dict[str, int] = {}
+        total = 0
         for i, d in enumerate(dates, 1):
             date_str = d.strftime("%Y%m%d")
             df = self._client.fetch_market_ohlcv(date_str, pykrx_market)
@@ -57,14 +57,12 @@ class KrDailyPriceCollector:
             if df.empty:
                 continue
 
-            count = self._upsert_day(df, d, stock_map)
-            for sym, c in count.items():
-                results[sym] = results.get(sym, 0) + c
+            total += self._upsert_day(df, d, stock_map)
 
             if i % 10 == 0 or i == len(dates):
                 logger.info(f"[KrDailyPrice] {market.value}: {i}/{len(dates)} days done")
 
-        return results
+        return {market.value: total}
 
     def _build_stock_map(self, market: Market) -> dict[str, int]:
         """Returns {6-digit ticker: stock_id} for the given market."""
@@ -78,16 +76,9 @@ class KrDailyPriceCollector:
             stock_map[ticker] = stock_id
         return stock_map
 
-    def _get_market_last_date(self, stock_map: dict[str, int]) -> date | None:
-        """Find the latest date across all stocks in this market."""
-        latest = None
+    def _get_market_last_date(self, market: Market) -> date | None:
         with get_connection() as conn:
-            repo = DailyPriceRepository(conn)
-            for stock_id in stock_map.values():
-                d = repo.get_latest_date(stock_id)
-                if d and (latest is None or d > latest):
-                    latest = d
-        return latest
+            return DailyPriceRepository(conn).get_latest_date_by_market(market)
 
     def _generate_dates(self, last_date: date | None) -> list[date]:
         start = (last_date + timedelta(days=1)) if last_date else (date.today() - timedelta(days=365))
@@ -98,37 +89,30 @@ class KrDailyPriceCollector:
 
     def _upsert_day(
         self, df, price_date: date, stock_map: dict[str, int]
-    ) -> dict[str, int]:
-        counts: dict[str, int] = {}
+    ) -> int:
+        rows: list[tuple] = []
+        for ticker, row in df.iterrows():
+            if int(row["volume"]) == 0:
+                continue
+            stock_id = stock_map.get(str(ticker))
+            if stock_id is None:
+                continue
+            try:
+                rows.append((
+                    stock_id, price_date,
+                    Decimal(str(int(row["open"]))),
+                    Decimal(str(int(row["high"]))),
+                    Decimal(str(int(row["low"]))),
+                    Decimal(str(int(row["close"]))),
+                    int(row["volume"]),
+                ))
+            except (InvalidOperation, ValueError) as e:
+                logger.warning(f"[KrDailyPrice] Skip {ticker}: {e}")
+
+        if not rows:
+            return 0
 
         with get_connection() as conn:
-            repo = DailyPriceRepository(conn)
-
-            for ticker, row in df.iterrows():
-                if int(row["volume"]) == 0:
-                    continue
-
-                stock_id = stock_map.get(str(ticker))
-                if stock_id is None:
-                    continue
-
-                try:
-                    price = DailyPrice(
-                        symbol=str(ticker),
-                        date=price_date,
-                        open=Decimal(str(int(row["open"]))),
-                        high=Decimal(str(int(row["high"]))),
-                        low=Decimal(str(int(row["low"]))),
-                        close=Decimal(str(int(row["close"]))),
-                        volume=int(row["volume"]),
-                    )
-                except (InvalidOperation, ValueError) as e:
-                    logger.warning(f"[KrDailyPrice] Skip {ticker}: {e}")
-                    continue
-
-                count = repo.upsert_batch(stock_id, [price])
-                counts[str(ticker)] = count
-
+            count = DailyPriceRepository(conn).bulk_upsert(rows)
             conn.commit()
-
-        return counts
+        return count

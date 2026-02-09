@@ -8,31 +8,48 @@ class DailyPriceRepository:
     def __init__(self, conn: connection):
         self._conn = conn
 
+    _UPSERT_SQL = """
+        INSERT INTO daily_prices (stock_id, date, open, high, low, close, volume)
+        VALUES %s
+        ON CONFLICT (stock_id, date) DO UPDATE SET
+            open = EXCLUDED.open, high = EXCLUDED.high,
+            low = EXCLUDED.low, close = EXCLUDED.close,
+            volume = EXCLUDED.volume
+    """
+
     def upsert_batch(self, stock_id: int, prices: list[DailyPrice]) -> int:
         if not prices:
             return 0
-        query = """
-            INSERT INTO daily_prices (stock_id, date, open, high, low, close, volume)
-            VALUES %s
-            ON CONFLICT (stock_id, date) DO UPDATE SET
-                open = EXCLUDED.open,
-                high = EXCLUDED.high,
-                low = EXCLUDED.low,
-                close = EXCLUDED.close,
-                volume = EXCLUDED.volume
-        """
         data = [
             (stock_id, p.date, p.open, p.high, p.low, p.close, p.volume)
             for p in prices
         ]
         with self._conn.cursor() as cur:
-            execute_values(cur, query, data)
+            execute_values(cur, self._UPSERT_SQL, data)
+            return cur.rowcount
+
+    def bulk_upsert(self, rows: list[tuple]) -> int:
+        if not rows:
+            return 0
+        with self._conn.cursor() as cur:
+            execute_values(cur, self._UPSERT_SQL, rows)
             return cur.rowcount
 
     def get_latest_date(self, stock_id: int) -> date | None:
         query = "SELECT MAX(date) FROM daily_prices WHERE stock_id = %s"
         with self._conn.cursor() as cur:
             cur.execute(query, (stock_id,))
+            result = cur.fetchone()
+            return result[0] if result and result[0] else None
+
+    def get_latest_date_by_market(self, market: Market) -> date | None:
+        query = """
+            SELECT MAX(dp.date) FROM daily_prices dp
+            JOIN stocks s ON dp.stock_id = s.id
+            WHERE s.market = %s AND s.is_active = true
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value,))
             result = cur.fetchone()
             return result[0] if result and result[0] else None
 

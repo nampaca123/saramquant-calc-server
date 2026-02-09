@@ -9,7 +9,7 @@ COLUMN_MAP = {"시가": "open", "고가": "high", "저가": "low", "종가": "cl
 
 
 class PykrxClient:
-    REQUEST_DELAY = 1.0
+    REQUEST_DELAY = 0.5
 
     def _throttle(self) -> None:
         time.sleep(self.REQUEST_DELAY)

@@ -2,7 +2,7 @@ import logging
 import os
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
-from app.schema import DailyPrice, Market
+from app.schema import Market
 from app.db import get_connection, StockRepository, DailyPriceRepository
 from app.collectors.clients import AlpacaClient
 
@@ -27,7 +27,7 @@ class UsDailyPriceCollector:
             logger.warning("[UsDailyPrice] No active US stocks")
             return {}
 
-        start, end = self._determine_date_range(stock_map)
+        start, end = self._determine_date_range(markets)
         if start > end:
             logger.info("[UsDailyPrice] Already up to date")
             return {}
@@ -56,12 +56,12 @@ class UsDailyPriceCollector:
                     stock_map[symbol] = stock_id
         return stock_map
 
-    def _determine_date_range(self, stock_map: dict[str, int]) -> tuple[date, date]:
+    def _determine_date_range(self, markets: list[Market]) -> tuple[date, date]:
         latest = None
         with get_connection() as conn:
             repo = DailyPriceRepository(conn)
-            for stock_id in stock_map.values():
-                d = repo.get_latest_date(stock_id)
+            for mkt in markets:
+                d = repo.get_latest_date_by_market(mkt)
                 if d and (latest is None or d > latest):
                     latest = d
 
@@ -72,43 +72,34 @@ class UsDailyPriceCollector:
     def _upsert_bars(
         self, bars: dict[str, list[dict]], stock_map: dict[str, int]
     ) -> dict[str, int]:
-        results: dict[str, int] = {}
+        all_rows: list[tuple] = []
+        symbol_count = 0
+
+        for symbol, bar_list in bars.items():
+            stock_id = stock_map.get(symbol)
+            if stock_id is None or not bar_list:
+                continue
+
+            for bar in bar_list:
+                try:
+                    all_rows.append((
+                        stock_id, bar["date"],
+                        Decimal(str(bar["open"])),
+                        Decimal(str(bar["high"])),
+                        Decimal(str(bar["low"])),
+                        Decimal(str(bar["close"])),
+                        int(bar["volume"]),
+                    ))
+                except (KeyError, InvalidOperation, ValueError) as e:
+                    logger.warning(f"[UsDailyPrice] Skip bar for {symbol}: {e}")
+            symbol_count += 1
+
+        if not all_rows:
+            return {}
 
         with get_connection() as conn:
-            repo = DailyPriceRepository(conn)
-
-            for symbol, bar_list in bars.items():
-                stock_id = stock_map.get(symbol)
-                if stock_id is None or not bar_list:
-                    continue
-
-                prices = self._transform(symbol, bar_list)
-                if not prices:
-                    continue
-
-                count = repo.upsert_batch(stock_id, prices)
-                results[symbol] = count
-
+            count = DailyPriceRepository(conn).bulk_upsert(all_rows)
             conn.commit()
 
-        collected = sum(results.values())
-        logger.info(f"[UsDailyPrice] Upserted {collected} rows for {len(results)} symbols")
-        return results
-
-    def _transform(self, symbol: str, bar_list: list[dict]) -> list[DailyPrice]:
-        prices = []
-        for bar in bar_list:
-            try:
-                prices.append(DailyPrice(
-                    symbol=symbol,
-                    date=bar["date"],
-                    open=Decimal(str(bar["open"])),
-                    high=Decimal(str(bar["high"])),
-                    low=Decimal(str(bar["low"])),
-                    close=Decimal(str(bar["close"])),
-                    volume=int(bar["volume"]),
-                ))
-            except (KeyError, InvalidOperation, ValueError) as e:
-                logger.warning(f"[UsDailyPrice] Skip bar for {symbol}: {e}")
-                continue
-        return prices
+        logger.info(f"[UsDailyPrice] Upserted {count} rows for {symbol_count} symbols")
+        return {"total": count}
