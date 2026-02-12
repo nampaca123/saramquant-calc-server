@@ -19,6 +19,10 @@ begin
   if not exists (select 1 from pg_type where typname = 'maturity_type') then
     create type public.maturity_type as enum ('91D','1Y','3Y','10Y');
   end if;
+
+  if not exists (select 1 from pg_type where typname = 'report_type') then
+    create type public.report_type as enum ('Q1','Q2','Q3','FY');
+  end if;
 end
 $do$;
 
@@ -28,6 +32,7 @@ create table if not exists public.stocks (
   name text not null,
   market public.market_type not null,
   is_active boolean not null default true,
+  dart_corp_code varchar(8),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint stocks_symbol_market_uq
@@ -36,6 +41,8 @@ create table if not exists public.stocks (
 
 create index if not exists stocks_market_idx on public.stocks (market);
 create index if not exists stocks_is_active_idx on public.stocks (is_active);
+create index if not exists stocks_dart_corp_code_idx on public.stocks (dart_corp_code)
+  where dart_corp_code is not null;
 
 create table if not exists public.daily_prices (
   id bigserial primary key,
@@ -170,6 +177,48 @@ create index if not exists idx_stock_indicators_date
   on public.stock_indicators (date desc);
 create index if not exists idx_stock_indicators_stock_date
   on public.stock_indicators (stock_id, date desc);
+
+create table if not exists public.financial_statements (
+  id bigserial primary key,
+  stock_id bigint not null references public.stocks(id) on delete cascade,
+  fiscal_year int not null,
+  report_type public.report_type not null,
+  revenue numeric(20,2),
+  operating_income numeric(20,2),
+  net_income numeric(20,2),
+  total_assets numeric(20,2),
+  total_liabilities numeric(20,2),
+  total_equity numeric(20,2),
+  shares_outstanding bigint,
+  created_at timestamptz not null default now(),
+  constraint financial_statements_uq
+    unique (stock_id, fiscal_year, report_type)
+);
+
+create index if not exists financial_statements_stock_id_idx
+  on public.financial_statements (stock_id);
+create index if not exists financial_statements_fiscal_year_idx
+  on public.financial_statements (fiscal_year desc, report_type);
+
+create table if not exists public.stock_fundamentals (
+  stock_id bigint not null references public.stocks(id) on delete cascade,
+  date date not null,
+  per numeric(12,4),
+  pbr numeric(12,4),
+  eps numeric(15,4),
+  bps numeric(15,4),
+  roe numeric(10,4),
+  debt_ratio numeric(10,4),
+  operating_margin numeric(10,4),
+  created_at timestamptz not null default now(),
+  constraint stock_fundamentals_pkey
+    primary key (stock_id, date)
+);
+
+create index if not exists idx_stock_fundamentals_date
+  on public.stock_fundamentals (date desc);
+create index if not exists idx_stock_fundamentals_stock_date
+  on public.stock_fundamentals (stock_id, date desc);
 
 do $do$
 begin

@@ -13,7 +13,7 @@ from app.utils import load_benchmark_returns, load_risk_free_rates
 logger = logging.getLogger(__name__)
 
 
-class ComputeEngine:
+class IndicatorComputeEngine:
     def __init__(self, conn: connection):
         self._conn = conn
         self._price_repo = DailyPriceRepository(conn)
