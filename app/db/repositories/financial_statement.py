@@ -39,7 +39,7 @@ class FinancialStatementRepository:
         ]
         with self._conn.cursor() as cur:
             execute_values(cur, query, data)
-            return cur.rowcount
+            return len(data)
 
     def get_ttm_by_stock(self, stock_id: int) -> list[FinancialStatement]:
         query = """

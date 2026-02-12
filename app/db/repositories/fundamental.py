@@ -33,4 +33,4 @@ class FundamentalRepository:
         query = f"INSERT INTO stock_fundamentals ({col_names}) VALUES %s"
         with self._conn.cursor() as cur:
             execute_values(cur, query, rows)
-            return cur.rowcount
+            return len(rows)
