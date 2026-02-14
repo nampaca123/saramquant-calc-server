@@ -13,12 +13,14 @@ saramquant-ml-server/
 │   ├── collectors/
 │   │   ├── clients/
 │   │   │   ├── alpaca.py
+│   │   │   ├── dart.py
 │   │   │   ├── ecos.py
 │   │   │   ├── fred.py
 │   │   │   ├── pykrx.py
 │   │   │   └── yfinance.py
 │   │   ├── benchmark_price.py
 │   │   ├── kr_daily_price.py
+│   │   ├── kr_financial_statement.py
 │   │   ├── risk_free_rate.py
 │   │   ├── stock_list.py
 │   │   └── us_daily_price.py
@@ -28,20 +30,29 @@ saramquant-ml-server/
 │   │   └── repositories/
 │   │       ├── benchmark.py
 │   │       ├── daily_price.py
+│   │       ├── financial_statement.py
+│   │       ├── fundamental.py
 │   │       ├── indicator.py
 │   │       ├── risk_free_rate.py
 │   │       └── stock.py
 │   │
 │   ├── pipeline/
 │   │   ├── __main__.py
-│   │   ├── compute.py
+│   │   ├── fundamental_compute.py
+│   │   ├── indicator_compute.py
 │   │   └── orchestrator.py
 │   │
 │   ├── services/
+│   │   ├── fundamental_collection_service.py
+│   │   ├── fundamental_service.py
 │   │   ├── indicator_service.py
 │   │   └── price_collection_service.py
 │   │
 │   ├── quant/
+│   │   ├── fundamentals/
+│   │   │   ├── profitability.py
+│   │   │   ├── stability.py
+│   │   │   └── valuation.py
 │   │   └── indicators/
 │   │       ├── momentum.py
 │   │       ├── moving_average.py
@@ -57,6 +68,7 @@ saramquant-ml-server/
 │   │   │   ├── pykrx.py
 │   │   │   └── yfinance.py
 │   │   ├── dto/
+│   │   │   ├── financial_statement.py
 │   │   │   ├── price.py
 │   │   │   ├── risk.py
 │   │   │   └── stock.py
@@ -65,7 +77,8 @@ saramquant-ml-server/
 │   │       ├── country.py
 │   │       ├── data_source.py
 │   │       ├── market.py
-│   │       └── maturity.py
+│   │       ├── maturity.py
+│   │       └── report_type.py
 │   │
 │   └── utils/
 │       ├── quant/
