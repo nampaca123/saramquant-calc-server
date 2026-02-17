@@ -54,7 +54,7 @@ class FinancialStatementRepository:
                          WHEN 'FY' THEN 4 WHEN 'Q3' THEN 3
                          WHEN 'Q2' THEN 2 WHEN 'Q1' THEN 1
                      END DESC
-            LIMIT 5
+            LIMIT 10
         """
         with self._conn.cursor() as cur:
             cur.execute(query, (stock_id,))
@@ -91,7 +91,7 @@ class FinancialStatementRepository:
                 result.setdefault(dto.stock_id, []).append(dto)
 
         for stock_id in result:
-            result[stock_id] = result[stock_id][:5]
+            result[stock_id] = result[stock_id][:10]
 
         return result
 
