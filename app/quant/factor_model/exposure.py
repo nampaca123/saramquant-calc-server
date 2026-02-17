@@ -33,7 +33,7 @@ def compute_exposures(
     mcap = shares_outstanding * close_prices
     exposures["size"] = np.log(mcap.replace(0, np.nan))
     exposures["value"] = (1.0 / pbr).replace([np.inf, -np.inf], np.nan)
-    exposures["momentum"] = returns_252 / returns_21 - 1
+    exposures["momentum"] = returns_252 - returns_21
     exposures["volatility"] = ewm_vol
 
     # Quality = equal-weighted average of ROE z-score + operating_margin z-score

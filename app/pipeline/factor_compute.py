@@ -13,10 +13,15 @@ class FactorComputeEngine:
         self._service = FactorModelService(conn)
         self._conn = conn
 
-    def run(self, markets: list[Market]) -> int:
+    def run(
+        self,
+        markets: list[Market],
+        price_maps: dict[Market, dict[int, list[tuple]]] | None = None,
+    ) -> int:
         total = 0
         for market in markets:
-            result = self._service.run(market)
+            pm = price_maps.get(market) if price_maps else None
+            result = self._service.run(market, pm)
             if result.get("status") == "ok":
                 total += result.get("exposures", 0)
         self._conn.commit()

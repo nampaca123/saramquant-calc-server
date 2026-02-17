@@ -21,13 +21,18 @@ class IndicatorComputeEngine:
         self._indicator_repo = IndicatorRepository(conn)
         self._factor_service = FactorModelService(conn)
 
-    def run(self, markets: list[Market]) -> int:
+    def run(
+        self,
+        markets: list[Market],
+        price_maps: dict[Market, dict[int, list[tuple]]] | None = None,
+    ) -> int:
         benchmark_returns = load_benchmark_returns(self._conn, markets)
         rf_rates = load_risk_free_rates(self._conn, markets)
 
         all_rows: list[tuple] = []
         for market in markets:
-            rows = self._process_market(market, benchmark_returns, rf_rates)
+            pm = price_maps.get(market) if price_maps else None
+            rows = self._process_market(market, benchmark_returns, rf_rates, pm)
             all_rows.extend(rows)
 
         deleted = self._indicator_repo.delete_by_markets(markets)
@@ -43,8 +48,10 @@ class IndicatorComputeEngine:
         market: Market,
         benchmark_returns: dict[Benchmark, pd.Series],
         rf_rates: dict[Country, float],
+        price_map: dict[int, list[tuple]] | None = None,
     ) -> list[tuple]:
-        price_map = self._price_repo.get_prices_by_market(market, limit_per_stock=300)
+        if price_map is None:
+            price_map = self._price_repo.get_prices_by_market(market, limit_per_stock=300)
         if not price_map:
             logger.warning(f"[Compute] No price data for {market.value}")
             return []

@@ -1,7 +1,6 @@
 import os
 from contextlib import contextmanager
 from typing import Generator
-import psycopg2
 from psycopg2 import pool
 from psycopg2.extensions import connection
 from dotenv import load_dotenv
@@ -36,6 +35,9 @@ def get_connection() -> Generator[connection, None, None]:
     conn = _get_pool().getconn()
     try:
         yield conn
+    except BaseException:
+        conn.rollback()
+        raise
     finally:
         _get_pool().putconn(conn)
 

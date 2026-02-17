@@ -24,11 +24,11 @@ def retry_with_backoff(
     base_delay: float = 1.0,
     max_delay: float = 60.0,
     exceptions: tuple = RETRYABLE_EXCEPTIONS,
-) -> Callable[[Callable[P, R]], Callable[P, R | None]]:
-    def decorator(func: Callable[P, R]) -> Callable[P, R | None]:
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
         @wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R | None:
-            last_exception = None
+        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+            last_exception: BaseException | None = None
 
             for attempt in range(max_retries):
                 try:
@@ -47,7 +47,7 @@ def retry_with_backoff(
                 f"[Failed] {func.__name__} after {max_retries} retries: "
                 f"{last_exception}"
             )
-            return None
+            raise last_exception  # type: ignore[misc]
 
         return wrapper
     return decorator

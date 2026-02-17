@@ -18,11 +18,16 @@ class FundamentalComputeEngine:
         self._fund_repo = FundamentalRepository(conn)
         self._price_repo = DailyPriceRepository(conn)
 
-    def run(self, markets: list[Market]) -> int:
+    def run(
+        self,
+        markets: list[Market],
+        price_maps: dict[Market, dict[int, list[tuple]]] | None = None,
+    ) -> int:
         all_rows: list[tuple] = []
 
         for market in markets:
-            rows = self._process_market(market)
+            pm = price_maps.get(market) if price_maps else None
+            rows = self._process_market(market, pm)
             all_rows.extend(rows)
 
         deleted = self._fund_repo.delete_by_markets(markets)
@@ -33,9 +38,13 @@ class FundamentalComputeEngine:
         logger.info(f"[FundCompute] Inserted {inserted} fundamental rows")
         return inserted
 
-    def _process_market(self, market: Market) -> list[tuple]:
+    def _process_market(
+        self, market: Market, price_map: dict[int, list[tuple]] | None = None
+    ) -> list[tuple]:
         fs_map = self._fs_repo.get_ttm_by_market(market)
-        price_map = self._price_repo.get_prices_by_market(market, limit_per_stock=1)
+
+        if price_map is None:
+            price_map = self._price_repo.get_prices_by_market(market, limit_per_stock=1)
 
         rows: list[tuple] = []
         fs_stock_ids = set(fs_map.keys()) if fs_map else set()
@@ -45,7 +54,7 @@ class FundamentalComputeEngine:
             if not prices:
                 continue
 
-            latest_close = float(prices[0][4])
+            latest_close = float(prices[-1][4])
             result = FundamentalService.compute(stock_id, latest_close, statements)
             if result:
                 rows.append(result)

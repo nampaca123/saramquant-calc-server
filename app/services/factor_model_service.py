@@ -44,7 +44,7 @@ class FactorModelService:
         self._factor_repo = FactorRepository(conn)
         self._fund_repo = FundamentalRepository(conn)
 
-    def run(self, market: Market) -> dict:
+    def run(self, market: Market, price_map: dict[int, list[tuple]] | None = None) -> dict:
         today = date.today()
         rf_rates = load_risk_free_rates(self._conn, [market])
         rf_daily = rf_rates.get(market_to_country(market), 3.0) / 100 / 252
@@ -59,7 +59,8 @@ class FactorModelService:
         sectors = pd.Series({s[0]: s[2] for s in stocks})
 
         # 2. price features
-        price_map = self._price_repo.get_prices_by_market(market, limit_per_stock=_PRICE_LIMIT)
+        if price_map is None:
+            price_map = self._price_repo.get_prices_by_market(market, limit_per_stock=_PRICE_LIMIT)
         close_series, returns_today, returns_252, returns_21, ewm_vol = (
             self._compute_price_features(stock_ids, price_map)
         )
@@ -224,9 +225,9 @@ class FactorModelService:
             if len(rets) > 0:
                 ret_today[sid] = rets.iloc[-1]
             if len(closes) >= 252:
-                ret_252[sid] = closes.iloc[-1]
+                ret_252[sid] = closes.iloc[-1] / closes.iloc[-252] - 1
             if len(closes) >= 21:
-                ret_21[sid] = closes.iloc[-21]
+                ret_21[sid] = closes.iloc[-1] / closes.iloc[-21] - 1
             if len(rets) >= 42:
                 vol_dict[sid] = rets.ewm(halflife=42).std().iloc[-1]
 

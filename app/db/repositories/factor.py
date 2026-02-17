@@ -72,16 +72,18 @@ class FactorRepository:
     ) -> list[tuple]:
         """Returns [(date, factor_name, return_value)] ordered by date ASC."""
         query = """
+            WITH ranked_dates AS (
+                SELECT DISTINCT date FROM factor_returns
+                WHERE market = %s ORDER BY date DESC LIMIT %s
+            )
             SELECT date, factor_name, return_value
             FROM factor_returns
-            WHERE market = %s
-            ORDER BY date DESC
-            LIMIT %s
+            WHERE market = %s AND date >= (SELECT MIN(date) FROM ranked_dates)
+            ORDER BY date ASC
         """
         with self._conn.cursor() as cur:
-            cur.execute(query, (market.value, limit * 50))
-            rows = cur.fetchall()
-        return list(reversed(rows))
+            cur.execute(query, (market.value, limit, market.value))
+            return cur.fetchall()
 
     def count_factor_return_dates(self, market: Market) -> int:
         query = """

@@ -114,7 +114,7 @@ class StockRepository:
         query = """
             UPDATE stocks SET is_active = false, updated_at = now()
             WHERE market = %s AND is_active = true
-              AND id NOT IN (SELECT DISTINCT stock_id FROM daily_prices)
+              AND NOT EXISTS (SELECT 1 FROM daily_prices dp WHERE dp.stock_id = stocks.id)
         """
         with self._conn.cursor() as cur:
             cur.execute(query, (market.value,))
@@ -130,8 +130,8 @@ class StockRepository:
                 COUNT(*) FILTER (WHERE is_active AND id IN (
                     SELECT stock_id FROM stock_fundamentals WHERE data_coverage IN ('NO_FS', 'INSUFFICIENT')
                 )) as no_fs,
-                COUNT(*) FILTER (WHERE is_active AND id NOT IN (
-                    SELECT DISTINCT stock_id FROM daily_prices
+                COUNT(*) FILTER (WHERE is_active AND NOT EXISTS (
+                    SELECT 1 FROM daily_prices dp WHERE dp.stock_id = stocks.id
                 )) as no_price
             FROM stocks
             WHERE market = %s
