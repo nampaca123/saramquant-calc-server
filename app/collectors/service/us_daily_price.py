@@ -9,6 +9,8 @@ from app.collectors.utils.market_groups import US_MARKETS
 
 logger = logging.getLogger(__name__)
 
+_INITIAL_LOOKBACK_DAYS = 400
+
 
 class UsDailyPriceCollector:
     def __init__(self):
@@ -64,7 +66,7 @@ class UsDailyPriceCollector:
                 if d and (latest is None or d > latest):
                     latest = d
 
-        start = (latest + timedelta(days=1)) if latest else (date.today() - timedelta(days=365))
+        start = (latest + timedelta(days=1)) if latest else (date.today() - timedelta(days=_INITIAL_LOOKBACK_DAYS))
         end = date.today()
         return start, end
 

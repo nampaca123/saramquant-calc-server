@@ -8,6 +8,8 @@ from app.collectors.utils.market_groups import MARKET_TO_PYKRX
 
 logger = logging.getLogger(__name__)
 
+_INITIAL_LOOKBACK_DAYS = 400
+
 
 class KrDailyPriceCollector:
     def __init__(self):
@@ -46,6 +48,7 @@ class KrDailyPriceCollector:
         logger.info(f"[KrDailyPrice] {market.value}: collecting {len(dates)} days")
 
         total = 0
+        trading_days = 0
         for i, d in enumerate(dates, 1):
             date_str = d.strftime("%Y%m%d")
             df = self._client.fetch_market_ohlcv(date_str, pykrx_market)
@@ -53,11 +56,15 @@ class KrDailyPriceCollector:
             if df.empty:
                 continue
 
+            trading_days += 1
             total += self._upsert_day(df, d, stock_map)
 
             if i % 10 == 0 or i == len(dates):
                 logger.info(f"[KrDailyPrice] {market.value}: {i}/{len(dates)} days done")
 
+        logger.info(
+            f"[KrDailyPrice] {market.value}: {trading_days} trading days, {total} records"
+        )
         return {market.value: total}
 
     def _build_stock_map(self, market: Market) -> dict[str, int]:
@@ -77,7 +84,7 @@ class KrDailyPriceCollector:
             return DailyPriceRepository(conn).get_latest_date_by_market(market)
 
     def _generate_dates(self, last_date: date | None) -> list[date]:
-        start = (last_date + timedelta(days=1)) if last_date else (date.today() - timedelta(days=365))
+        start = (last_date + timedelta(days=1)) if last_date else (date.today() - timedelta(days=_INITIAL_LOOKBACK_DAYS))
         end = date.today()
         if start > end:
             return []

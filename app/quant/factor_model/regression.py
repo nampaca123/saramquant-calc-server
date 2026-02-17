@@ -20,7 +20,7 @@ def constrained_wls(
         X: (N, 1+S+I) design matrix [market(1) | styles(S) | industries(I)]
         w: (N,) weights = sqrt(market_cap)
         industry_mcap_weights: (I,) mcap share per industry
-        n_styles: number of style factors (S=6)
+        n_styles: number of style factors actually present in X
 
     Returns:
         (factor_returns, specific_returns)

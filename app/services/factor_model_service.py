@@ -84,16 +84,23 @@ class FactorModelService:
             logger.warning(f"[FactorModel] {market.value}: only {len(valid_ids)} valid rows after filter")
             return {"market": market.value, "status": "skipped", "reason": "insufficient_valid"}
 
-        X = X_df.loc[valid_ids].values
+        X_sub = X_df.loc[valid_ids]
         y = excess_returns.loc[valid_ids].values
+
+        # re-drop zero-variance columns after excess-return filtering
+        zero_cols = X_sub.columns[(X_sub == 0).all()]
+        if len(zero_cols) > 0:
+            X_sub = X_sub.drop(columns=zero_cols)
+
+        X = X_sub.values
+        factor_names = list(X_sub.columns)
+        style_set = set(STYLE_FACTORS)
+        n_styles = sum(1 for c in factor_names if c in style_set)
+        industry_cols = [c for c in factor_names if c != "market" and c not in style_set]
 
         mcap = shares.reindex(valid_ids).fillna(0) * close_series.reindex(valid_ids).fillna(0)
         w = np.sqrt(mcap.values.astype(float).clip(min=0))
         w = np.where(np.isnan(w) | (w == 0), 1.0, w)
-
-        factor_names = list(X_df.columns)
-        n_styles = len(STYLE_FACTORS)
-        industry_cols = [c for c in factor_names if c not in (["market"] + STYLE_FACTORS)]
 
         industry_mcap = np.array([
             mcap.reindex(valid_ids)[sectors.reindex(valid_ids) == col].sum()
