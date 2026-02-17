@@ -62,6 +62,14 @@ class FundamentalService:
         )
 
     @staticmethod
+    def no_fs_row(stock_id: int) -> tuple:
+        return (
+            stock_id, date.today(),
+            None, None, None, None, None, None, None,
+            DataCoverage.NO_FS.value,
+        )
+
+    @staticmethod
     def _ttm_income(
         statements: list[FinancialStatement],
     ) -> tuple[float, float, float] | None:

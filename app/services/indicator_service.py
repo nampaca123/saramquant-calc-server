@@ -8,8 +8,9 @@ from app.quant.indicators import (
     bollinger_bands, atr, adx,
     obv, vma,
     parabolic_sar,
-    daily_returns, beta, alpha, sharpe_ratio,
+    daily_returns, alpha, sharpe_ratio,
 )
+from app.quant.factor_model.beta import ols_beta
 
 MIN_ROWS = 60
 
@@ -40,6 +41,7 @@ class IndicatorService:
         df: pd.DataFrame,
         benchmark_returns: pd.Series | None,
         risk_free_rate: float,
+        factor_beta_val: float | None = None,
     ) -> tuple:
         close, high, low, volume = df["close"], df["high"], df["low"], df["volume"]
 
@@ -50,7 +52,7 @@ class IndicatorService:
 
         stock_ret = daily_returns(close)
         beta_val, alpha_val, sharpe_val = IndicatorService._compute_risk(
-            stock_ret, benchmark_returns, risk_free_rate
+            stock_ret, benchmark_returns, risk_free_rate, factor_beta_val
         )
 
         return (
@@ -82,6 +84,7 @@ class IndicatorService:
         stock_ret: pd.Series,
         benchmark_ret: pd.Series | None,
         rf_rate: float,
+        factor_beta_val: float | None = None,
     ) -> tuple[float | None, float | None, float | None]:
         clean_len = len(stock_ret.dropna())
         beta_val = alpha_val = sharpe_val = None
@@ -91,7 +94,10 @@ class IndicatorService:
 
             if benchmark_ret is not None and clean_len >= MIN_ROWS:
                 try:
-                    beta_val = round(float(beta(stock_ret, benchmark_ret)), 4)
+                    if factor_beta_val is not None:
+                        beta_val = round(factor_beta_val, 4)
+                    else:
+                        beta_val = round(float(ols_beta(stock_ret, benchmark_ret)), 4)
                     alpha_val = round(float(alpha(stock_ret, benchmark_ret, rf_rate, beta_val)), 4)
                 except Exception:
                     pass

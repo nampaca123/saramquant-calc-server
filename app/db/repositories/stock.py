@@ -120,6 +120,43 @@ class StockRepository:
             cur.execute(query, (market.value,))
             return cur.rowcount
 
+    def get_integrity_stats(self, market: Market) -> tuple:
+        query = """
+            SELECT
+                COUNT(*) FILTER (WHERE is_active) as active_total,
+                COUNT(*) FILTER (WHERE is_active AND sector IS NOT NULL AND sector != 'N/A') as has_sector,
+                COUNT(*) FILTER (WHERE is_active AND sector IS NULL) as sector_null,
+                COUNT(*) FILTER (WHERE is_active AND sector = 'N/A') as sector_na,
+                COUNT(*) FILTER (WHERE is_active AND id IN (
+                    SELECT stock_id FROM stock_fundamentals WHERE data_coverage IN ('NO_FS', 'INSUFFICIENT')
+                )) as no_fs,
+                COUNT(*) FILTER (WHERE is_active AND id NOT IN (
+                    SELECT DISTINCT stock_id FROM daily_prices
+                )) as no_price
+            FROM stocks
+            WHERE market = %s
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value,))
+            return cur.fetchone()
+
+    def get_eligible_for_factors(self, market: Market) -> list[tuple]:
+        """Returns [(id, symbol, sector)] for quant-eligible stocks."""
+        query = """
+            SELECT id, symbol, sector FROM stocks
+            WHERE market = %s AND is_active = true
+              AND sector IS NOT NULL AND sector != 'N/A'
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value,))
+            return cur.fetchall()
+
+    def get_sectors_by_market(self, market: Market) -> dict[int, str]:
+        query = "SELECT id, sector FROM stocks WHERE market = %s AND is_active = true"
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value,))
+            return {row[0]: row[1] for row in cur.fetchall()}
+
     def deactivate_unlisted(self, market: Market, active_symbols: set[str]) -> int:
         if not active_symbols:
             return 0

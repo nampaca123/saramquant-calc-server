@@ -230,6 +230,63 @@ create index if not exists idx_stock_fundamentals_date
 create index if not exists idx_stock_fundamentals_stock_date
   on public.stock_fundamentals (stock_id, date desc);
 
+-- ============================================================
+-- Factor model tables
+-- ============================================================
+
+create table if not exists public.factor_exposures (
+  stock_id bigint not null references public.stocks(id) on delete cascade,
+  date date not null,
+  size_z numeric(8,4),
+  value_z numeric(8,4),
+  momentum_z numeric(8,4),
+  volatility_z numeric(8,4),
+  quality_z numeric(8,4),
+  leverage_z numeric(8,4),
+  constraint factor_exposures_pkey
+    primary key (stock_id, date)
+);
+
+create index if not exists idx_factor_exposures_date
+  on public.factor_exposures (date desc);
+
+create table if not exists public.factor_returns (
+  market public.market_type not null,
+  date date not null,
+  factor_name varchar(50) not null,
+  return_value numeric(12,8) not null,
+  constraint factor_returns_pkey
+    primary key (market, date, factor_name)
+);
+
+create index if not exists idx_factor_returns_market_date
+  on public.factor_returns (market, date desc);
+
+create table if not exists public.factor_covariance (
+  market public.market_type not null,
+  date date not null,
+  matrix jsonb not null,
+  constraint factor_covariance_pkey
+    primary key (market, date)
+);
+
+create table if not exists public.sector_aggregates (
+  market public.market_type not null,
+  sector varchar(100) not null,
+  date date not null,
+  stock_count int not null,
+  median_per numeric(12,4),
+  median_pbr numeric(12,4),
+  median_roe numeric(12,6),
+  median_operating_margin numeric(12,6),
+  median_debt_ratio numeric(12,6),
+  constraint sector_aggregates_pkey
+    primary key (market, sector, date)
+);
+
+create index if not exists idx_sector_aggregates_market_date
+  on public.sector_aggregates (market, date desc);
+
 do $do$
 begin
   if not exists (

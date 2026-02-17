@@ -3,7 +3,7 @@ from .momentum import rsi, macd, stochastic
 from .volatility import bollinger_bands, atr, adx
 from .volume import obv, vma
 from .trend import parabolic_sar
-from .risk import daily_returns, beta, alpha, sharpe_ratio
+from .risk import daily_returns, alpha, sharpe_ratio
 
 __all__ = [
     "sma", "ema", "wma",
@@ -11,5 +11,5 @@ __all__ = [
     "bollinger_bands", "atr", "adx",
     "obv", "vma",
     "parabolic_sar",
-    "daily_returns", "beta", "alpha", "sharpe_ratio",
+    "daily_returns", "alpha", "sharpe_ratio",
 ]

@@ -4,16 +4,19 @@ import pandas as pd
 
 from app.schema import Market
 from app.db import get_connection, StockRepository
-from app.collectors.clients import PykrxClient, NasdaqScreenerClient
+from app.collectors.clients import PykrxClient, NasdaqScreenerClient, FinnhubClient
 from app.collectors.utils.market_groups import MARKET_TO_PYKRX, KR_MARKETS, US_MARKETS
 
 logger = logging.getLogger(__name__)
+
+_FINNHUB_NON_EQUITY = "N/A"
 
 
 class SectorCollector:
     def __init__(self):
         self._pykrx = PykrxClient()
         self._nasdaq = NasdaqScreenerClient()
+        self._finnhub = FinnhubClient()
 
     def collect(self, markets: list[Market]) -> int:
         total = 0
@@ -23,6 +26,7 @@ class SectorCollector:
             total += self._collect_kr(kr)
         if us:
             total += self._collect_us(us)
+            total += self._collect_us_finnhub_fallback(us)
         logger.info(f"[SectorCollector] Total updated: {total}")
         return total
 
@@ -100,5 +104,43 @@ class SectorCollector:
             repo = StockRepository(conn)
             count = repo.update_sectors(updates)
             conn.commit()
-            logger.info(f"[SectorCollector] US updated: {count}")
+            logger.info(f"[SectorCollector] US Screener updated: {count}")
+            return count
+
+    def _collect_us_finnhub_fallback(self, markets: list[Market]) -> int:
+        rows = []
+        with get_connection() as conn:
+            repo = StockRepository(conn)
+            for market in markets:
+                for _, symbol in repo.get_stocks_without_sector(market):
+                    rows.append((symbol, market.value))
+
+        if not rows:
+            logger.info("[SectorCollector] Finnhub fallback: no NULL sectors remaining")
+            return 0
+
+        symbols = [r[0] for r in rows]
+        symbol_market = {r[0]: r[1] for r in rows}
+        logger.info(f"[SectorCollector] Finnhub fallback: {len(symbols)} stocks")
+
+        sector_map = self._finnhub.fetch_sectors_batch(symbols)
+        updates = []
+        for symbol, industry in sector_map.items():
+            if industry is None:
+                continue
+            sector = _FINNHUB_NON_EQUITY if industry == _FINNHUB_NON_EQUITY else industry
+            updates.append((symbol, symbol_market[symbol], sector))
+
+        if not updates:
+            return 0
+
+        with get_connection() as conn:
+            repo = StockRepository(conn)
+            count = repo.update_sectors(updates)
+            conn.commit()
+            na_count = sum(1 for _, _, s in updates if s == _FINNHUB_NON_EQUITY)
+            logger.info(
+                f"[SectorCollector] Finnhub updated: {count} "
+                f"({count - na_count} sectors, {na_count} non-equity)"
+            )
             return count

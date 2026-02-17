@@ -1,12 +1,11 @@
 import logging
-from datetime import date
 
 from psycopg2.extensions import connection
 
 from app.db import DailyPriceRepository
 from app.db.repositories.financial_statement import FinancialStatementRepository
 from app.db.repositories.fundamental import FundamentalRepository
-from app.schema import DataCoverage, Market
+from app.schema import Market
 from app.services.fundamental_service import FundamentalService
 
 logger = logging.getLogger(__name__)
@@ -57,11 +56,7 @@ class FundamentalComputeEngine:
         no_fs_count = 0
         for stock_id in price_map:
             if stock_id not in fs_stock_ids:
-                rows.append((
-                    stock_id, date.today(),
-                    None, None, None, None, None, None, None,
-                    DataCoverage.NO_FS.value,
-                ))
+                rows.append(FundamentalService.no_fs_row(stock_id))
                 no_fs_count += 1
 
         logger.info(

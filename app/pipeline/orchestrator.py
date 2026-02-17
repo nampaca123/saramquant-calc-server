@@ -8,6 +8,9 @@ from app.services.fundamental_collection_service import FundamentalCollectionSer
 from app.collectors import SectorCollector
 from app.pipeline.indicator_compute import IndicatorComputeEngine
 from app.pipeline.fundamental_compute import FundamentalComputeEngine
+from app.pipeline.factor_compute import FactorComputeEngine
+from app.pipeline.sector_aggregate_compute import SectorAggregateComputeEngine
+from app.pipeline.integrity_check import IntegrityCheckEngine
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +24,22 @@ class PipelineOrchestrator:
         logger.info("[Pipeline] Starting KR daily pipeline")
         self._collector.collect_all("kr")
         self._deactivate_no_price_stocks(REGION_CONFIG["kr"]["markets"])
-        self._compute("kr")
-        self._compute_fundamentals("kr")
+        self._compute_fundamentals("kr")          # 1. fundamentals first (factor model needs them)
+        self._compute_factors("kr")                # 2. factor model (produces exposures + covariance)
+        self._compute("kr")                        # 3. indicators (uses factor betas from step 2)
+        self._compute_sector_aggregates("kr")
+        self._run_integrity_check("kr")
         logger.info("[Pipeline] KR daily pipeline complete")
 
     def run_daily_us(self) -> None:
         logger.info("[Pipeline] Starting US daily pipeline")
         self._collector.collect_all("us")
         self._deactivate_no_price_stocks(REGION_CONFIG["us"]["markets"])
-        self._compute("us")
-        self._compute_fundamentals("us")
+        self._compute_fundamentals("us")           # 1. fundamentals first
+        self._compute_factors("us")                # 2. factor model
+        self._compute("us")                        # 3. indicators (uses factor betas)
+        self._compute_sector_aggregates("us")
+        self._run_integrity_check("us")
         logger.info("[Pipeline] US daily pipeline complete")
 
     def run_daily_all(self) -> None:
@@ -80,6 +89,26 @@ class PipelineOrchestrator:
             engine = FundamentalComputeEngine(conn)
             count = engine.run(markets)
             logger.info(f"[Pipeline] Computed {count} fundamental rows")
+
+    def _compute_factors(self, region: str) -> None:
+        markets = REGION_CONFIG[region]["markets"]
+        with get_connection() as conn:
+            engine = FactorComputeEngine(conn)
+            count = engine.run(markets)
+            logger.info(f"[Pipeline] Computed {count} factor exposure rows")
+
+    def _compute_sector_aggregates(self, region: str) -> None:
+        markets = REGION_CONFIG[region]["markets"]
+        with get_connection() as conn:
+            engine = SectorAggregateComputeEngine(conn)
+            count = engine.run(markets)
+            logger.info(f"[Pipeline] Computed {count} sector aggregate rows")
+
+    def _run_integrity_check(self, region: str) -> None:
+        markets = REGION_CONFIG[region]["markets"]
+        with get_connection() as conn:
+            engine = IntegrityCheckEngine(conn)
+            engine.run(markets)
 
     def run_sectors(self) -> None:
         logger.info("[Pipeline] Starting sector collection")

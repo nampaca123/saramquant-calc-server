@@ -2,6 +2,7 @@ from .connection import get_connection, close_pool
 from .repositories import (
     BenchmarkRepository,
     DailyPriceRepository,
+    FactorRepository,
     FinancialStatementRepository,
     FundamentalRepository,
     IndicatorRepository,
@@ -14,6 +15,7 @@ __all__ = [
     "close_pool",
     "BenchmarkRepository",
     "DailyPriceRepository",
+    "FactorRepository",
     "FinancialStatementRepository",
     "FundamentalRepository",
     "IndicatorRepository",

@@ -8,6 +8,7 @@ from app.db.repositories.indicator import IndicatorRepository
 from app.schema import Market, Benchmark, Country
 from app.schema.enums.market import market_to_benchmark, market_to_country
 from app.services import IndicatorService
+from app.services.factor_model_service import FactorModelService
 from app.utils import load_benchmark_returns, load_risk_free_rates
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class IndicatorComputeEngine:
         self._conn = conn
         self._price_repo = DailyPriceRepository(conn)
         self._indicator_repo = IndicatorRepository(conn)
+        self._factor_service = FactorModelService(conn)
 
     def run(self, markets: list[Market]) -> int:
         benchmark_returns = load_benchmark_returns(self._conn, markets)
@@ -49,14 +51,20 @@ class IndicatorComputeEngine:
 
         bench_ret = benchmark_returns.get(market_to_benchmark(market))
         rf_rate = rf_rates.get(market_to_country(market), 3.0)
+        factor_betas = self._factor_service.get_betas(market)
 
         rows: list[tuple] = []
         for i, (stock_id, raw_prices) in enumerate(price_map.items(), 1):
             df = IndicatorService.build_dataframe(raw_prices)
             if df is not None:
-                rows.append(IndicatorService.compute(stock_id, df, bench_ret, rf_rate))
+                fb = factor_betas.get(stock_id)
+                rows.append(IndicatorService.compute(stock_id, df, bench_ret, rf_rate, fb))
             if i % 500 == 0:
                 logger.info(f"[Compute] {market.value}: {i}/{len(price_map)} stocks")
 
-        logger.info(f"[Compute] {market.value}: {len(rows)}/{len(price_map)} stocks computed")
+        fb_used = sum(1 for sid in price_map if sid in factor_betas)
+        logger.info(
+            f"[Compute] {market.value}: {len(rows)}/{len(price_map)} stocks computed "
+            f"({fb_used} factor betas)"
+        )
         return rows

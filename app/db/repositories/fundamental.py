@@ -35,3 +35,27 @@ class FundamentalRepository:
         with self._conn.cursor() as cur:
             execute_values(cur, query, rows)
             return len(rows)
+
+    def get_with_shares(self, stock_ids: list[int]) -> list[tuple]:
+        """Returns [(stock_id, pbr, roe, operating_margin, debt_ratio, shares_outstanding)]."""
+        query = """
+            SELECT f.stock_id, f.pbr, f.roe, f.operating_margin, f.debt_ratio,
+                   fs.shares_outstanding
+            FROM stock_fundamentals f
+            JOIN stocks s ON s.id = f.stock_id
+            LEFT JOIN LATERAL (
+                SELECT shares_outstanding FROM financial_statements
+                WHERE stock_id = f.stock_id
+                ORDER BY fiscal_year DESC,
+                    CASE report_type
+                        WHEN 'FY' THEN 4 WHEN 'Q3' THEN 3
+                        WHEN 'Q2' THEN 2 WHEN 'Q1' THEN 1
+                    END DESC
+                LIMIT 1
+            ) fs ON true
+            WHERE f.stock_id = ANY(%s)
+              AND f.data_coverage NOT IN ('NO_FS', 'INSUFFICIENT')
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (stock_ids,))
+            return cur.fetchall()
