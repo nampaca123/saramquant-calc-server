@@ -7,7 +7,6 @@ from app.schema import Market
 from app.services import PriceCollectionService
 from app.services.price_collection_service import REGION_CONFIG
 from app.services.fundamental_collection_service import FundamentalCollectionService
-from app.collectors import SectorCollector
 from app.pipeline.indicator_compute import IndicatorComputeEngine
 from app.pipeline.fundamental_compute import FundamentalComputeEngine
 from app.pipeline.factor_compute import FactorComputeEngine
@@ -17,6 +16,7 @@ from app.pipeline.integrity_check import IntegrityCheckEngine
 logger = logging.getLogger(__name__)
 
 PriceMaps = dict[Market, dict[int, list[tuple]]]
+_SAFETY_THRESHOLD = 0.10
 
 
 class PipelineOrchestrator:
@@ -38,9 +38,19 @@ class PipelineOrchestrator:
         self._run_compute_pipeline("us")
         logger.info("[Pipeline] US daily pipeline complete")
 
-    def run_daily_all(self) -> None:
-        self.run_daily_kr()
-        self.run_daily_us()
+    def run_initial_kr(self) -> None:
+        logger.info("[Pipeline] Starting KR initial pipeline")
+        self._collector.collect_all("kr")
+        self._fund_collector.collect_all("kr")
+        self._run_compute_pipeline("kr")
+        logger.info("[Pipeline] KR initial pipeline complete")
+
+    def run_initial_us(self) -> None:
+        logger.info("[Pipeline] Starting US initial pipeline")
+        self._collector.collect_all("us")
+        self._fund_collector.collect_all("us")
+        self._run_compute_pipeline("us")
+        logger.info("[Pipeline] US initial pipeline complete")
 
     def run_collect_fs_kr(self) -> None:
         logger.info("[Pipeline] Collecting KR financial statements")
@@ -54,36 +64,68 @@ class PipelineOrchestrator:
         self._compute_fundamentals("us")
         logger.info("[Pipeline] US financial statement pipeline complete")
 
-    def run_full(self) -> None:
-        logger.info("[Pipeline] Starting full pipeline")
-        self._collector.collect_all("kr")
-        self._collector.collect_all("us")
-        self._fund_collector.collect_all("kr")
-        self._fund_collector.collect_all("us")
-        for region in ("kr", "us"):
-            self._run_compute_pipeline(region)
-        logger.info("[Pipeline] Full pipeline complete")
-
-    def run_sectors(self) -> None:
-        logger.info("[Pipeline] Starting sector collection")
-        all_markets = REGION_CONFIG["kr"]["markets"] + REGION_CONFIG["us"]["markets"]
-        count = SectorCollector().collect(all_markets)
-        logger.info(f"[Pipeline] Sector collection complete: {count} updated")
-
     # ── compute pipeline ──
 
     def _run_compute_pipeline(self, region: str) -> None:
         markets = REGION_CONFIG[region]["markets"]
-        self._deactivate_no_price_stocks(markets)
+
+        if not self._progressive_deactivate(markets):
+            return
+
         price_maps = self._load_prices(markets)
 
         fund_ok = self._safe_step("fundamentals", self._compute_fundamentals, region, price_maps)
         factor_ok = self._safe_step("factors", self._compute_factors, region, price_maps) if fund_ok else False
         if factor_ok:
-            self._safe_step("indicators", self._compute, region, price_maps)
+            self._safe_step("indicators", self._compute_indicators, region, price_maps)
         if fund_ok:
             self._safe_step("sector_agg", self._compute_sector_aggregates, region)
         self._run_integrity_check(region)
+
+    # ── progressive deactivation (single transaction) ──
+
+    def _progressive_deactivate(self, markets: list[Market]) -> bool:
+        with get_connection() as conn:
+            repo = StockRepository(conn)
+
+            for market in markets:
+                symbols = self._collector.active_symbols.get(market, set())
+                reactivated = repo.reactivate_listed_stocks(market, symbols)
+                if reactivated:
+                    logger.info(f"[Pipeline] Reactivated {reactivated} stocks in {market.value}")
+
+                no_price = repo.deactivate_no_price_stocks(market)
+                if no_price:
+                    logger.info(f"[Pipeline] Deactivated {no_price} no-price stocks in {market.value}")
+
+                no_sector = repo.deactivate_no_sector_stocks(market)
+                if no_sector:
+                    logger.info(f"[Pipeline] Deactivated {no_sector} no-sector stocks in {market.value}")
+
+                no_fs = repo.deactivate_no_fs_stocks(market)
+                if no_fs:
+                    logger.info(f"[Pipeline] Deactivated {no_fs} no-FS stocks in {market.value}")
+
+            if not self._safety_check(repo, markets):
+                conn.rollback()
+                return False
+
+            conn.commit()
+            return True
+
+    def _safety_check(self, repo: StockRepository, markets: list[Market]) -> bool:
+        total, active = repo.count_by_activity(markets)
+        ratio = active / total if total > 0 else 0
+        if ratio < _SAFETY_THRESHOLD:
+            logger.error(
+                f"[Pipeline] Safety check FAILED: {active}/{total} active ({ratio:.1%}). "
+                f"Did you forget to run the initial pipeline? Aborting compute."
+            )
+            return False
+        logger.info(f"[Pipeline] Safety check OK: {active}/{total} active ({ratio:.1%})")
+        return True
+
+    # ── helpers ──
 
     def _load_prices(self, markets: list[Market]) -> PriceMaps:
         price_maps: PriceMaps = {}
@@ -101,18 +143,9 @@ class PipelineOrchestrator:
             logger.error(f"[Pipeline] Step '{name}' failed: {e}", exc_info=True)
             return False
 
-    # ── individual steps ──
+    # ── individual compute steps ──
 
-    def _deactivate_no_price_stocks(self, markets: list) -> None:
-        with get_connection() as conn:
-            repo = StockRepository(conn)
-            for market in markets:
-                count = repo.deactivate_no_price_stocks(market)
-                if count:
-                    logger.info(f"[Pipeline] Deactivated {count} no-price stocks in {market.value}")
-            conn.commit()
-
-    def _compute(self, region: str, price_maps: PriceMaps | None = None) -> None:
+    def _compute_indicators(self, region: str, price_maps: PriceMaps | None = None) -> None:
         markets = REGION_CONFIG[region]["markets"]
         with get_connection() as conn:
             engine = IndicatorComputeEngine(conn)

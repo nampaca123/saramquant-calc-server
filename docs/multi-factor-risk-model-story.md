@@ -211,19 +211,30 @@ SQL의 `PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ...)` 함수를 사용해서
 
 ### 문제
 
-KIS 마스터 파일에는 보통주가 아닌 종목(SPAC, Warrant, Unit 등)이 섞여 있다. 이들은 재무제표도 없고 섹터 분류도 안 되는데, 퀀트 분석에 포함되면 UX를 해친다. 또한 NASDAQ Screener API가 일부 종목의 섹터를 반환하지 않는 문제도 있었다.
+KIS 마스터 파일에는 보통주가 아닌 종목(SPAC, Warrant, Unit 등)이 섞여 있다. 이들은 재무제표도 없고 섹터 분류도 안 되는데, 퀀트 분석에 포함되면 UX를 해친다. 또한 일봉이 없거나 재무제표가 미수집된 종목이 팩터 모델에 들어가면 Singular matrix 등의 수학적 오류를 유발한다.
 
-### 해결: sector 컬럼을 게이트로 활용
+### 해결: `is_active`를 주 게이트로 활용 (점진적 비활성화)
 
-`is_active` 플래그 대신, `sector` 컬럼의 값으로 퀀트 분석 대상을 결정한다:
+파이프라인이 데이터 수집 후, compute 단계 진입 전에 **점진적으로** 분석 불가 종목을 `is_active=false`로 비활성화한다:
 
-| `sector` 값 | 의미 | 퀀트 분석 |
+```
+[Reactivate]     마스터 파일에 있는 종목 재활성화     ─┐
+[Deactivate]     no-price → no-sector → no-FS       ├ 단일 트랜잭션
+[Safety Check]   active < 10% → rollback + 중단      ─┘
+```
+
+| 단계 | 대상 | 사유 |
 |---|---|---|
-| 유효 문자열 (예: 'Technology') | 정상 보통주 | **포함** |
-| `'N/A'` | 비보통주 (SPAC, 셸컴퍼니 등) | **제외** |
-| `NULL` | 미분류 (API 실패) | **제외** |
+| `reactivate_listed_stocks` | 마스터 파일에 존재하는 비활성 종목 | 전일 비활성화된 종목이 오늘 데이터가 채워졌을 수 있음 |
+| `deactivate_no_price_stocks` | `daily_prices`에 레코드 없는 종목 | 거래정지/신규상장 직후 등 |
+| `deactivate_no_sector_stocks` | `sector`가 NULL이거나 'N/A' | SPAC, 워런트, 셸컴퍼니 등 비보통주 |
+| `deactivate_no_fs_stocks` | `financial_statements`에 레코드 없는 종목 | FS 미수집 시 펀더멘털/팩터 모델 계산 불가 |
 
-`is_active`를 쓰지 않는 이유: 종목 목록 수집기(`upsert_batch`)가 매일 `is_active=true`로 리셋하기 때문이다. 만약 무결성 체크에서 `is_active=false`로 바꿔도, 다음 날 수집에서 다시 `true`로 돌아온다. 이 충돌을 피하기 위해, 수집기가 건드리지 않는 `sector` 컬럼을 게이트로 사용한다.
+이 전체 흐름은 **단일 트랜잭션** 안에서 실행된다. safety check가 실패하면(active 비율 10% 미만) 트랜잭션을 롤백하여 DB에 비정상 상태를 남기지 않는다. 이는 초기 파이프라인 실행 없이 일일 파이프라인만 돌린 경우를 조기 감지한다.
+
+**`upsert_batch`와의 관계**: `upsert_batch()`는 기존 종목의 `is_active` 상태를 변경하지 않는다(INSERT 시에만 기본값 `true`). 따라서 전일 비활성화 상태가 다음 날 자동으로 되살아나지 않으며, `reactivate_listed_stocks`가 명시적으로 재활성화를 담당한다.
+
+**방어적 중복 검증**: `get_eligible_for_factors()`는 `is_active=true` 외에 `sector IS NOT NULL AND sector != 'N/A'` 조건을 추가로 유지한다. 비활성화 단계가 에러로 스킵되거나 compute가 단독 실행되는 경우를 방어한다.
 
 ### Finnhub Fallback
 
@@ -251,12 +262,24 @@ NASDAQ Screener가 섹터를 반환하지 않는 종목에 대해 Finnhub API를
 
 ## 7. 파이프라인 실행 순서
 
-팩터 모델 도입으로 파이프라인 단계가 늘어났다. 순서가 중요하다 — 각 단계는 이전 단계의 결과에 의존한다:
+### CLI 명령어
+
+| 명령어 | 용도 | 주기 |
+|---|---|---|
+| `kr-initial` / `us-initial` | 초기실행 (전체 수집 + FS 수집 + compute) | 최초 1회 |
+| `kr` / `us` | 일일실행 (가격/섹터/벤치마크/RFR 수집 + compute) | 매일 |
+| `kr-fs` / `us-fs` | 재무제표 수집 + 펀더멘털 재계산 | 분기별 |
+
+### 초기실행 흐름 (kr-initial / us-initial)
 
 ```
 [Collect]                 종목 목록, 가격, 벤치마크, 무위험금리, 섹터
     ↓
-[Deactivate]             가격 없는 종목 비활성화
+[Collect FS]             재무제표 (DART / Railway)
+    ↓
+[Reactivate]             마스터 파일에 있는 종목 재활성화     ─┐
+[Deactivate]             no-price → no-sector → no-FS       ├ 단일 트랜잭션
+[Safety Check]           active < 10% → rollback + 중단      ─┘
     ↓
 [Compute Fundamentals]   PER, PBR, ROE 등 → 팩터 노출도의 입력
     ↓
@@ -268,6 +291,10 @@ NASDAQ Screener가 섹터를 반환하지 않는 종목에 대해 Finnhub API를
     ↓
 [Integrity Check]        데이터 품질 보고 (읽기 전용)
 ```
+
+### 일일실행 흐름 (kr / us)
+
+초기실행과 동일하되 **[Collect FS] 단계가 없다.** DB에 이미 있는 재무제표 기준으로 no-FS 비활성화를 수행한다.
 
 핵심은 **Fundamentals → Factors → Indicators** 순서다. Indicators가 팩터 베타를 쓰려면 Factors가 먼저 계산되어야 하고, Factors가 Size(시가총액), Value(PBR) 등을 쓰려면 Fundamentals가 먼저 계산되어야 한다.
 

@@ -29,27 +29,28 @@ class StockListCollector:
             results[market] = count
         return results
 
-    def collect_market(self, market: Market) -> int:
-        count = self._collect_market(market)
+    def collect_market(self, market: Market) -> tuple[int, set[str]]:
+        count, symbols = self._collect_market(market)
         logger.info(f"[StockList] {market.value}: {count} stocks")
-        return count
+        return count, symbols
 
-    def _collect_market(self, market: Market) -> int:
+    def _collect_market(self, market: Market) -> tuple[int, set[str]]:
         raw_data = self._download(market)
         if raw_data is None:
-            return 0
+            return 0, set()
 
         stocks = self._parse(raw_data, market)
         if not stocks:
-            return 0
+            return 0, set()
 
+        symbols = {s.symbol for s in stocks}
         with get_connection() as conn:
             repo = StockRepository(conn)
             repo.upsert_batch(stocks)
-            repo.deactivate_unlisted(market, {s.symbol for s in stocks})
+            repo.deactivate_unlisted(market, symbols)
             conn.commit()
 
-        return len(stocks)
+        return len(stocks), symbols
 
     @retry_with_backoff(max_retries=3, base_delay=2.0)
     def _download(self, market: Market) -> bytes | None:

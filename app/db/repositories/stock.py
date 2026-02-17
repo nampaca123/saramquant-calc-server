@@ -64,7 +64,7 @@ class StockRepository:
             INSERT INTO stocks (symbol, name, market)
             VALUES %s
             ON CONFLICT (symbol, market)
-            DO UPDATE SET name = EXCLUDED.name, updated_at = now(), is_active = true
+            DO UPDATE SET name = EXCLUDED.name, updated_at = now()
         """
         data = [(s.symbol, s.name, s.market.value) for s in stocks]
         with self._conn.cursor() as cur:
@@ -167,3 +167,48 @@ class StockRepository:
         with self._conn.cursor() as cur:
             cur.execute(query, (market.value, list(active_symbols)))
             return cur.rowcount
+
+    def reactivate_listed_stocks(self, market: Market, active_symbols: set[str]) -> int:
+        if not active_symbols:
+            return 0
+        query = """
+            UPDATE stocks SET is_active = true, updated_at = now()
+            WHERE market = %s AND is_active = false AND symbol = ANY(%s)
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value, list(active_symbols)))
+            return cur.rowcount
+
+    def deactivate_no_sector_stocks(self, market: Market) -> int:
+        query = """
+            UPDATE stocks SET is_active = false, updated_at = now()
+            WHERE market = %s AND is_active = true
+              AND (sector IS NULL OR sector = 'N/A')
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value,))
+            return cur.rowcount
+
+    def deactivate_no_fs_stocks(self, market: Market) -> int:
+        query = """
+            UPDATE stocks SET is_active = false, updated_at = now()
+            WHERE market = %s AND is_active = true
+              AND NOT EXISTS (
+                  SELECT 1 FROM financial_statements fs WHERE fs.stock_id = stocks.id
+              )
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market.value,))
+            return cur.rowcount
+
+    def count_by_activity(self, markets: list[Market]) -> tuple[int, int]:
+        """Returns (total, active) counts for given markets."""
+        market_values = [m.value for m in markets]
+        query = """
+            SELECT COUNT(*),
+                   COUNT(*) FILTER (WHERE is_active)
+            FROM stocks WHERE market = ANY(%s::market_type[])
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (market_values,))
+            return cur.fetchone()

@@ -27,6 +27,9 @@ REGION_CONFIG = {
 
 
 class PriceCollectionService:
+    def __init__(self):
+        self.active_symbols: dict[Market, set[str]] = {}
+
     def collect_all(self, region: str) -> dict[str, int]:
         cfg = REGION_CONFIG[region]
         results: dict[str, int] = {}
@@ -44,7 +47,8 @@ class PriceCollectionService:
         collector = StockListCollector()
         total = 0
         for market in markets:
-            count = collector.collect_market(market)
+            count, symbols = collector.collect_market(market)
+            self.active_symbols[market] = symbols
             logger.info(f"[PriceCollection] Stocks {market.value}: {count}")
             total += count
         return total
