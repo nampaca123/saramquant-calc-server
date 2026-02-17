@@ -5,11 +5,9 @@ from decimal import Decimal, InvalidOperation
 from app.schema import Market
 from app.db import get_connection, StockRepository, DailyPriceRepository
 from app.collectors.clients import AlpacaClient
-from app.collectors.utils.market_groups import US_MARKETS
+from app.collectors.utils.market_groups import US_MARKETS, INITIAL_LOOKBACK_DAYS
 
 logger = logging.getLogger(__name__)
-
-_INITIAL_LOOKBACK_DAYS = 400
 
 
 class UsDailyPriceCollector:
@@ -66,7 +64,7 @@ class UsDailyPriceCollector:
                 if d and (latest is None or d > latest):
                     latest = d
 
-        start = (latest + timedelta(days=1)) if latest else (date.today() - timedelta(days=_INITIAL_LOOKBACK_DAYS))
+        start = (latest + timedelta(days=1)) if latest else (date.today() - timedelta(days=INITIAL_LOOKBACK_DAYS - 1))
         end = date.today()
         return start, end
 

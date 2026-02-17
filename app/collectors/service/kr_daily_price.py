@@ -4,11 +4,9 @@ from decimal import Decimal, InvalidOperation
 from app.schema import Market
 from app.db import get_connection, StockRepository, DailyPriceRepository
 from app.collectors.clients import PykrxClient
-from app.collectors.utils.market_groups import MARKET_TO_PYKRX
+from app.collectors.utils.market_groups import MARKET_TO_PYKRX, INITIAL_LOOKBACK_DAYS
 
 logger = logging.getLogger(__name__)
-
-_INITIAL_LOOKBACK_DAYS = 400
 
 
 class KrDailyPriceCollector:
@@ -84,7 +82,7 @@ class KrDailyPriceCollector:
             return DailyPriceRepository(conn).get_latest_date_by_market(market)
 
     def _generate_dates(self, last_date: date | None) -> list[date]:
-        start = (last_date + timedelta(days=1)) if last_date else (date.today() - timedelta(days=_INITIAL_LOOKBACK_DAYS))
+        start = (last_date + timedelta(days=1)) if last_date else (date.today() - timedelta(days=INITIAL_LOOKBACK_DAYS - 1))
         end = date.today()
         if start > end:
             return []

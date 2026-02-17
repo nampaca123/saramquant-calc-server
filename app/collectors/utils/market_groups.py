@@ -7,3 +7,5 @@ MARKET_TO_PYKRX = {
 
 KR_MARKETS = frozenset({Market.KR_KOSPI, Market.KR_KOSDAQ})
 US_MARKETS = frozenset({Market.US_NYSE, Market.US_NASDAQ})
+
+INITIAL_LOOKBACK_DAYS = 400
