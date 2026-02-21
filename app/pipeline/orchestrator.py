@@ -12,6 +12,7 @@ from app.pipeline.fundamental_compute import FundamentalComputeEngine
 from app.pipeline.factor_compute import FactorComputeEngine
 from app.pipeline.sector_aggregate_compute import SectorAggregateComputeEngine
 from app.pipeline.integrity_check import IntegrityCheckEngine
+from app.collectors.service.exchange_rate import ExchangeRateCollector
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +24,14 @@ class PipelineOrchestrator:
     def __init__(self):
         self._collector = PriceCollectionService()
         self._fund_collector = FundamentalCollectionService()
+        self._exchange_rate_collector = ExchangeRateCollector()
 
     # ── public entry points ──
 
     def run_daily_kr(self) -> None:
         logger.info("[Pipeline] Starting KR daily pipeline")
         self._collector.collect_all("kr")
+        self._safe_step("exchange_rates", self._collect_exchange_rates)
         self._run_compute_pipeline("kr")
         logger.info("[Pipeline] KR daily pipeline complete")
 
@@ -190,3 +193,7 @@ class PipelineOrchestrator:
         with get_connection() as conn:
             engine = IntegrityCheckEngine(conn)
             engine.run(markets)
+
+    def _collect_exchange_rates(self) -> None:
+        count = self._exchange_rate_collector.collect()
+        logger.info(f"[Pipeline] Collected {count} exchange rate rows")

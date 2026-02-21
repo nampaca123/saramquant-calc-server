@@ -15,9 +15,11 @@ def create_app() -> Flask:
 
     from app.api import api_bp
     from app.api.quant.simulation import simulation_bp
+    from app.api.portfolio import portfolio_bp
 
     app.register_blueprint(api_bp)
     app.register_blueprint(simulation_bp)
+    app.register_blueprint(portfolio_bp)
 
     @app.before_request
     def _check_api_key():

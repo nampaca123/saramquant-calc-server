@@ -7,6 +7,15 @@ class StockRepository:
     def __init__(self, conn: connection):
         self._conn = conn
 
+    def find_by_id(self, stock_id: int) -> dict | None:
+        query = "SELECT id, symbol, name, market, sector FROM stocks WHERE id = %s"
+        with self._conn.cursor() as cur:
+            cur.execute(query, (stock_id,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {"id": row[0], "symbol": row[1], "name": row[2], "market": row[3], "sector": row[4]}
+
     def get_by_symbol(
         self, symbol: str, market: Market | None = None
     ) -> tuple[int, str, str, Market] | None:

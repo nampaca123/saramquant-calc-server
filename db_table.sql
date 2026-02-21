@@ -431,3 +431,74 @@ begin
   end if;
 end
 $do$;
+
+-- ============================================================
+-- Portfolio tables
+-- ============================================================
+
+create table if not exists public.user_portfolios (
+  id            bigserial primary key,
+  user_id       uuid not null references public.users(id) on delete cascade,
+  market_group  varchar(2) not null check (market_group in ('KR', 'US')),
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  unique (user_id, market_group)
+);
+
+create index if not exists idx_user_portfolios_user_id
+  on public.user_portfolios (user_id);
+
+create table if not exists public.portfolio_holdings (
+  id            bigserial primary key,
+  portfolio_id  bigint not null references public.user_portfolios(id) on delete cascade,
+  stock_id      bigint not null references public.stocks(id),
+  shares        numeric(15,4) not null check (shares > 0),
+  avg_price     numeric(15,4) not null check (avg_price > 0),
+  currency      varchar(3) not null check (currency in ('KRW', 'USD')),
+  purchased_at  date not null,
+  purchase_fx_rate numeric(12,4),
+  price_source  varchar(20) not null default 'AUTO',
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  unique (portfolio_id, stock_id)
+);
+
+create index if not exists idx_portfolio_holdings_portfolio_id
+  on public.portfolio_holdings (portfolio_id);
+
+create table if not exists public.exchange_rates (
+  id    bigserial primary key,
+  pair  varchar(7) not null,
+  date  date not null,
+  rate  numeric(12,4) not null,
+  unique (pair, date)
+);
+
+create index if not exists idx_exchange_rates_pair_date
+  on public.exchange_rates (pair, date desc);
+
+do $do$
+begin
+  if not exists (
+    select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where t.tgname = 'trg_user_portfolios_updated_at' and c.relname = 'user_portfolios'
+  ) then
+    execute $sql$
+      create trigger trg_user_portfolios_updated_at
+      before update on public.user_portfolios
+      for each row execute function public.set_updated_at();
+    $sql$;
+  end if;
+
+  if not exists (
+    select 1 from pg_trigger t join pg_class c on c.oid = t.tgrelid
+    where t.tgname = 'trg_portfolio_holdings_updated_at' and c.relname = 'portfolio_holdings'
+  ) then
+    execute $sql$
+      create trigger trg_portfolio_holdings_updated_at
+      before update on public.portfolio_holdings
+      for each row execute function public.set_updated_at();
+    $sql$;
+  end if;
+end
+$do$;
