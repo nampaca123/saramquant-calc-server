@@ -1,4 +1,4 @@
-# SaramQuant ML Server 설계서
+# SaramQuant Calc Server 설계서
 
 ## 1. 프로젝트 개요
 
@@ -12,7 +12,7 @@
 |--------|------|------|
 | Frontend | Next.js | 대시보드 UI |
 | Gateway | Spring Boot (Kotlin) | API Gateway, 캐싱 |
-| ML Server | Flask (Python) | 데이터 수집, 퀀트 분석, ML |
+| Calc Server | Flask (Python) | 데이터 수집, 퀀트 분석, 리스크 뱃지 파이프라인 |
 | US FS Collector | Nest.js (TypeScript) | US 재무제표 수집 마이크로서비스 (Railway US East) |
 | Database | Supabase (PostgreSQL) | 데이터 저장 |
 | Cache | Redis | API 응답 캐싱 |
@@ -21,7 +21,7 @@
 
 ```
 ┌──────────────────┐   HTTP POST /collect   ┌─────────────────────────────────┐
-│  ML Server       │ ────────────────────▶  │  saramquant-usa-fstatements-    │
+│  Calc Server       │ ────────────────────▶  │  saramquant-usa-fstatements-    │
 │  (한국 리전)     │   GET /status/:jobId   │  collector (US East, Railway)   │
 │                  │ ◀──── polling ────────  │                                │
 └────────┬─────────┘                        └────────────┬────────────────────┘
@@ -32,8 +32,8 @@
                      └──────────────┘
 ```
 
-ML Server가 US 재무제표 수집을 트리거하면, US East에 배포된 마이크로서비스가 SEC EDGAR에서 벌크 데이터를 다운로드·파싱·DB 적재까지 처리한다.
-ML Server는 jobId로 상태를 폴링하여 완료를 확인한다.
+Calc Server가 US 재무제표 수집을 트리거하면, US East에 배포된 마이크로서비스가 SEC EDGAR에서 벌크 데이터를 다운로드·파싱·DB 적재까지 처리한다.
+Calc Server는 jobId로 상태를 폴링하여 완료를 확인한다.
 
 ---
 
@@ -201,9 +201,9 @@ python -m app.pipeline sectors # 섹터 수집만 (수동 실행/디버깅용)
 │                                                             │
 │  [KR] DART API → financial_statements 저장                  │
 │                                                             │
-│  [US] ML Server → POST /collect → 마이크로서비스 트리거     │
+│  [US] Calc Server → POST /collect → 마이크로서비스 트리거     │
 │       마이크로서비스: EDGAR ZIP 다운로드 → 파싱 → DB 저장   │
-│       ML Server ← GET /status/:jobId 폴링으로 완료 확인    │
+│       Calc Server ← GET /status/:jobId 폴링으로 완료 확인    │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -623,28 +623,69 @@ python -m app.pipeline sectors # 섹터 수집만 (수동 실행/디버깅용)
 
 ## 6. API 명세
 
-### Gateway API (Spring Boot)
+### Gateway API (Spring Boot, Kotlin)
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/stocks` | 종목 목록 |
-| GET | `/api/stocks/{symbol}` | 종목 상세 |
-| GET | `/api/prices/daily/{symbol}` | 일봉 데이터 |
-| GET | `/api/indicators/{symbol}` | 기술적 지표 (온디맨드 계산) |
-| GET | `/api/risk/{symbol}` | 리스크 지표 (온디맨드 계산) |
-| GET | `/api/predictions/{symbol}` | ML 예측 결과 |
+**인증 / 사용자**
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/login/oauth2/code/{provider}` | OAuth 콜백 (Google, Kakao) |
+| POST | `/api/auth/refresh` | Access Token 재발급 |
+| GET | `/api/users/me` | 내 프로필 |
+| PATCH | `/api/users/me` | 프로필 수정 |
 
-### Internal API (Flask)
+**대시보드 (Screener 통합)**
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/api/dashboard/stocks?market=&tier=&sector=&sort=&page=&size=` | 종목 카드 목록 |
+| GET | `/api/dashboard/sectors?market=` | 섹터 필터용 목록 |
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| GET | `/api/stocks` | 종목 목록 |
-| GET | `/api/stocks/<symbol>` | 종목 상세 |
-| GET | `/api/prices/daily/<symbol>` | 일봉 데이터 |
-| GET | `/api/indicators/<symbol>` | 기술적 지표 (온디맨드 계산) |
-| GET | `/api/risk/<symbol>` | 리스크 지표 (Beta, Alpha, Sharpe) |
+**종목 상세**
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/api/stocks/{symbol}?market=&lang=` | 종목 리포트 |
+| GET | `/api/stocks/{symbol}/prices?market=&period=` | OHLCV 시계열 |
+| GET | `/api/stocks/{symbol}/benchmark?market=&period=` | 벤치마크 비교 |
+| GET | `/api/stocks/{symbol}/ai-analysis?market=&preset=&lang=` | 캐시된 AI 분석 |
+
+**AI 전략 분석**
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/api/ai/stock-analysis` | LLM 종목 분석 트리거 |
+| POST | `/api/ai/portfolio-analysis` | LLM 포트폴리오 진단 트리거 |
+| GET | `/api/ai/usage` | AI 사용량 조회 |
+
+**포트폴리오**
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/api/portfolios` | 포트폴리오 목록 |
+| GET | `/api/portfolios/{id}` | 포트폴리오 상세 |
+| POST | `/api/portfolios/{id}/buy` | 매수 |
+| POST | `/api/portfolios/{id}/sell/{holdingId}` | 매도 |
+
+**시뮬레이션**
+| Method | Path | 설명 |
+|--------|------|------|
+| GET | `/api/stocks/{symbol}/simulation` | 몬테카를로 시뮬레이션 |
+| POST | `/api/portfolios/{id}/risk-score` | 리스크 점수 |
+| POST | `/api/portfolios/{id}/risk` | 리스크 분해 |
+| POST | `/api/portfolios/{id}/diversification` | 분산 효과 |
+
+### Calc Server Internal API (Flask, Python)
+
+| Method | Path | 설명 |
+|--------|------|------|
+| POST | `/internal/portfolios/risk-score` | 가중평균 리스크 스코어 |
+| POST | `/internal/portfolios/risk` | 공분산 리스크 분해 (MCAR) |
+| POST | `/internal/portfolios/diversification` | HHI, Effective N, 분산효과 비율 |
+| POST | `/internal/portfolios/price-lookup` | 날짜별 종가 + 환율 |
 | GET | `/api/stocks/<symbol>/simulation` | 몬테카를로 시뮬레이션 (GBM/Bootstrap) |
 | GET | `/health` | 헬스 체크 |
+
+데이터 수집과 지표/리스크뱃지 일괄 계산은 API가 아닌 CLI 파이프라인으로 처리:
+
+```bash
+python -m app.pipeline kr|us|all|kr-fs|us-fs|full
+```
 
 ### US Financial Statements Collector (Nest.js, 마이크로서비스)
 
@@ -653,12 +694,6 @@ python -m app.pipeline sectors # 섹터 수집만 (수동 실행/디버깅용)
 | POST | `/usa-financial-statements/collect` | 수집 작업 트리거 → `{ jobId }` 반환 |
 | GET | `/usa-financial-statements/status/:jobId` | 작업 상태 조회 |
 | GET | `/usa-financial-statements/health` | 헬스 체크 |
-
-데이터 수집과 지표 일괄 계산은 API가 아닌 CLI 파이프라인으로 처리:
-
-```bash
-python -m app.pipeline kr|us|all|kr-fs|us-fs|full
-```
 
 ---
 
