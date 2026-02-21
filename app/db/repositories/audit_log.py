@@ -2,8 +2,6 @@ import json
 import logging
 from typing import Optional
 
-from psycopg2.extras import execute_values
-
 from app.db.connection import get_connection
 
 logger = logging.getLogger(__name__)

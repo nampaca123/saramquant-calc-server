@@ -1,7 +1,7 @@
 import logging
 
-from app.log.model.pipeline_metadata import PipelineMetadata
-from app.log.repository.audit_log_repository import insert_audit_log
+from app.schema.dto.pipeline_metadata import PipelineMetadata
+from app.db.repositories.audit_log import insert_audit_log
 
 logger = logging.getLogger(__name__)
 

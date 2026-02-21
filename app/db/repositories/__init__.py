@@ -1,3 +1,4 @@
+from .audit_log import insert_audit_log
 from .benchmark import BenchmarkRepository
 from .daily_price import DailyPriceRepository
 from .exchange_rate import ExchangeRateRepository
@@ -11,6 +12,7 @@ from .risk_free_rate import RiskFreeRateRepository
 from .stock import StockRepository
 
 __all__ = [
+    "insert_audit_log",
     "BenchmarkRepository",
     "DailyPriceRepository",
     "ExchangeRateRepository",

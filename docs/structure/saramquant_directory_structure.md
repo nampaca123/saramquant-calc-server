@@ -43,6 +43,7 @@ saramquant-calc-server/
 │   ├── db/
 │   │   ├── connection.py
 │   │   └── repositories/
+│   │       ├── audit_log.py
 │   │       ├── benchmark.py
 │   │       ├── daily_price.py
 │   │       ├── exchange_rate.py
@@ -56,11 +57,6 @@ saramquant-calc-server/
 │   │       └── stock.py
 │   │
 │   ├── log/
-│   │   ├── model/
-│   │   │   ├── audit_log.py            # AuditLogEntry dataclass
-│   │   │   └── pipeline_metadata.py    # StepResult, PipelineMetadata dataclass
-│   │   ├── repository/
-│   │   │   └── audit_log_repository.py # psycopg2 INSERT (try-except 격리)
 │   │   ├── service/
 │   │   │   └── audit_log_service.py    # log_api(), log_pipeline()
 │   │   └── middleware/
@@ -116,6 +112,7 @@ saramquant-calc-server/
 │   ├── schema/
 │   │   ├── dto/
 │   │   │   ├── financial_statement.py
+│   │   │   ├── pipeline_metadata.py
 │   │   │   ├── price.py
 │   │   │   ├── risk.py
 │   │   │   └── stock.py

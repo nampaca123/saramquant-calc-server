@@ -1,4 +1,4 @@
-from .dto import BenchmarkPrice, DailyPrice, FinancialStatement, OHLCV, RiskFreeRate, StockInfo
+from .dto import BenchmarkPrice, DailyPrice, FinancialStatement, OHLCV, PipelineMetadata, RiskFreeRate, StepResult, StockInfo
 from .enums import (
     Benchmark,
     Country,
@@ -22,8 +22,10 @@ __all__ = [
     "Market",
     "Maturity",
     "OHLCV",
+    "PipelineMetadata",
     "ReportType",
     "RiskFreeRate",
+    "StepResult",
     "StockInfo",
     "market_to_benchmark",
     "market_to_country",

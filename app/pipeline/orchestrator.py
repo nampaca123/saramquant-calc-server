@@ -14,7 +14,7 @@ from app.pipeline.factor_compute import FactorComputeEngine
 from app.pipeline.sector_aggregate_compute import SectorAggregateComputeEngine
 from app.pipeline.integrity_check import IntegrityCheckEngine
 from app.collectors.service.exchange_rate import ExchangeRateCollector
-from app.log.model.pipeline_metadata import StepResult, PipelineMetadata
+from app.schema import StepResult, PipelineMetadata
 from app.log.service.audit_log_service import log_pipeline
 
 logger = logging.getLogger(__name__)
