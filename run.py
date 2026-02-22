@@ -1,6 +1,10 @@
+import os
+
 from app import create_app
+from app.scheduler import init_scheduler
 
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    init_scheduler()
+    app.run(port=int(os.environ.get("PORT", 5000)))
