@@ -88,6 +88,7 @@ class PortfolioSimulationService:
                 "var": stats["var"],
                 "cvar": stats["cvar"],
                 "final_value_percentiles": stats["final_price_percentiles"],
+                "path_percentiles": stats["path_percentiles"],
             },
             "parameters": {
                 "lookback_days": lookback,

@@ -34,10 +34,25 @@ def price_percentiles(
     return {level: round(float(val), 2) for level, val in zip(levels, values)}
 
 
+def path_percentiles(
+    paths: np.ndarray,
+    levels: tuple = (10, 25, 50, 75, 90),
+) -> list[dict]:
+    pct = np.round(np.percentile(paths, levels, axis=0), 2)
+    days = list(range(paths.shape[1]))
+    result = [{"day": d} for d in days]
+    for i, level in enumerate(levels):
+        row = pct[i].tolist()
+        for t, val in enumerate(row):
+            result[t][str(level)] = val
+    return result
+
+
 def summary(paths: np.ndarray, confidence: float = 0.95) -> dict:
     return {
         "expected_return": round(expected_return(paths), 6),
         "var": round(value_at_risk(paths, confidence), 6),
         "cvar": round(conditional_var(paths, confidence), 6),
         "final_price_percentiles": price_percentiles(paths),
+        "path_percentiles": path_percentiles(paths),
     }
