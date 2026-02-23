@@ -30,6 +30,12 @@ def price_lookup():
         "date": result["date"].isoformat(),
         "source": result["source"],
     }
+    if "high" in result:
+        resp["high"] = float(result["high"])
+    if "low" in result:
+        resp["low"] = float(result["low"])
+    if "open" in result:
+        resp["open"] = float(result["open"])
     if "fx_rate" in result:
         resp["fx_rate"] = result["fx_rate"]
 

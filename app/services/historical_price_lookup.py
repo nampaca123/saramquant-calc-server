@@ -35,9 +35,9 @@ class HistoricalPriceLookup:
         market = Market(stock["market"])
         is_kr = market in (Market.KR_KOSPI, Market.KR_KOSDAQ)
 
-        price = self._try_db(stock_id, target_date)
-        if price is not None:
-            result = {"close": price, "date": target_date, "source": "DB"}
+        ohlc = self._try_db_ohlc(stock_id, target_date)
+        if ohlc is not None:
+            result = {**ohlc, "date": target_date, "source": "DB"}
         else:
             result = None
             for offset in range(MAX_LOOKBACK_DAYS):
@@ -91,14 +91,20 @@ class HistoricalPriceLookup:
 
         return float(best[1])
 
-    def _try_db(self, stock_id: int, target_date: date) -> Decimal | None:
+    def _try_db_ohlc(self, stock_id: int, target_date: date) -> dict | None:
         with get_connection() as conn:
             repo = DailyPriceRepository(conn)
             for offset in range(MAX_LOOKBACK_DAYS):
                 d = target_date - timedelta(days=offset)
                 prices = repo.get_prices(stock_id, start_date=d, end_date=d, limit=1)
                 if prices:
-                    return Decimal(str(prices[0].close))
+                    p = prices[0]
+                    return {
+                        "open": Decimal(str(p.open)),
+                        "high": Decimal(str(p.high)),
+                        "low": Decimal(str(p.low)),
+                        "close": Decimal(str(p.close)),
+                    }
         return None
 
     def _try_external(self, symbol: str, d: date, is_kr: bool) -> Decimal | None:
