@@ -8,6 +8,6 @@ RUN pip install --no-cache-dir --no-deps pykrx==1.2.4 && \
 
 COPY . .
 
-EXPOSE 5000
+EXPOSE 8080
 
-CMD ["python", "run.py"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "app:create_app()"]
