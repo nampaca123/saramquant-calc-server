@@ -12,49 +12,13 @@ def _get_portfolio_id():
     return int(pid) if pid else None
 
 
-@portfolio_bp.route("/risk-score", methods=["POST"])
-def risk_score():
+@portfolio_bp.route("/full-analysis", methods=["POST"])
+def full_analysis():
     pid = _get_portfolio_id()
     if not pid:
         return jsonify({"error": "portfolio_id required"}), 400
     try:
-        return jsonify(PortfolioAnalysisService.risk_score(pid))
+        return jsonify(PortfolioAnalysisService.full_analysis(pid))
     except Exception as e:
-        logger.exception("risk_score failed for portfolio %s", pid)
-        return jsonify({"error": str(e)}), 200
-
-
-@portfolio_bp.route("/risk", methods=["POST"])
-def risk_decomposition():
-    pid = _get_portfolio_id()
-    if not pid:
-        return jsonify({"error": "portfolio_id required"}), 400
-    try:
-        return jsonify(PortfolioAnalysisService.risk_decomposition(pid))
-    except Exception as e:
-        logger.exception("risk_decomposition failed for portfolio %s", pid)
-        return jsonify({"error": str(e)}), 200
-
-
-@portfolio_bp.route("/diversification", methods=["POST"])
-def diversification():
-    pid = _get_portfolio_id()
-    if not pid:
-        return jsonify({"error": "portfolio_id required"}), 400
-    try:
-        return jsonify(PortfolioAnalysisService.diversification(pid))
-    except Exception as e:
-        logger.exception("diversification failed for portfolio %s", pid)
-        return jsonify({"error": str(e)}), 200
-
-
-@portfolio_bp.route("/benchmark-comparison", methods=["POST"])
-def benchmark_comparison():
-    pid = _get_portfolio_id()
-    if not pid:
-        return jsonify({"error": "portfolio_id required"}), 400
-    try:
-        return jsonify(PortfolioAnalysisService.benchmark_comparison(pid))
-    except Exception as e:
-        logger.exception("benchmark_comparison failed for portfolio %s", pid)
+        logger.exception("full_analysis failed for portfolio %s", pid)
         return jsonify({"error": str(e)}), 200

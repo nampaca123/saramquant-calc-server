@@ -16,6 +16,18 @@ class StockRepository:
                 return None
             return {"id": row[0], "symbol": row[1], "name": row[2], "market": row[3], "sector": row[4]}
 
+    def find_by_ids(self, stock_ids: list[int]) -> dict[int, dict]:
+        if not stock_ids:
+            return {}
+        query = "SELECT id, symbol, name, market, sector FROM stocks WHERE id = ANY(%s)"
+        with self._conn.cursor() as cur:
+            cur.execute(query, (stock_ids,))
+            return {
+                row[0]: {"id": row[0], "symbol": row[1], "name": row[2],
+                         "market": row[3], "sector": row[4]}
+                for row in cur.fetchall()
+            }
+
     def get_by_symbol(
         self, symbol: str, market: Market | None = None
     ) -> tuple[int, str, str, Market] | None:

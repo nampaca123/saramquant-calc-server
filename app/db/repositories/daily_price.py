@@ -121,6 +121,27 @@ class DailyPriceRepository:
                 result[stock_id].append(row[1:])
             return result
 
+    def get_close_prices_batch(
+        self, stock_ids: list[int], limit: int = 252
+    ) -> dict[int, dict]:
+        if not stock_ids:
+            return {}
+        query = """
+            SELECT stock_id, date, close FROM (
+                SELECT stock_id, date, close,
+                       ROW_NUMBER() OVER (PARTITION BY stock_id ORDER BY date DESC) AS rn
+                FROM daily_prices WHERE stock_id = ANY(%s)
+            ) t WHERE rn <= %s
+        """
+        with self._conn.cursor() as cur:
+            cur.execute(query, (stock_ids, limit))
+            result: dict[int, dict] = {}
+            for stock_id, dt, close in cur.fetchall():
+                if stock_id not in result:
+                    result[stock_id] = {}
+                result[stock_id][dt] = float(close)
+            return result
+
     # ── Delete operations ──
 
     def delete_all(self) -> int:

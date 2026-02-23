@@ -7,14 +7,16 @@ def compute_risk_score(
     portfolio_returns: np.ndarray,
     market_group: str,
     effective_lookback: int,
+    benchmark_vol: float | None = None,
 ) -> dict:
     if len(portfolio_returns) < 20:
         return {"score": None, "tier": "UNKNOWN", "reason": "Insufficient data"}
 
     portfolio_vol = float(np.std(portfolio_returns, ddof=1) * np.sqrt(252))
 
-    benchmark = Benchmark.KR_KOSPI if market_group == "KR" else Benchmark.US_SP500
-    benchmark_vol = _get_benchmark_vol(benchmark, lookback=min(effective_lookback, 252))
+    if benchmark_vol is None:
+        benchmark = Benchmark.KR_KOSPI if market_group == "KR" else Benchmark.US_SP500
+        benchmark_vol = _get_benchmark_vol(benchmark, lookback=min(effective_lookback, 252))
 
     if benchmark_vol is None or benchmark_vol == 0:
         return {"score": None, "tier": "UNKNOWN", "reason": "Benchmark data unavailable"}
