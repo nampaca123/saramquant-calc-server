@@ -54,8 +54,14 @@ KIS에서 제공하는 마스터 파일. 인증 불필요, 매일 자동 업데�
 
 | 시장 | 클라이언트 | 비고 |
 |------|-----------|------|
-| 한국 | pykrx (`PykrxClient`) | KRX에서 시장별 전 종목 일괄 조회 |
-| 미국 | Alpaca (`AlpacaClient`) | 배치 50종목 단위, SDK 자동 페이지네이션 |
+| 한국 | pykrx (`PykrxClient`) | 날짜 단위로 시장 전 종목 OHLCV 일괄 조회, 거래량=0 행 제외 |
+| 미국 | Alpaca (`AlpacaClient`) | NYSE+NASDAQ 통합 수집, 50종목 배치, IEX 데이터 피드 |
+
+**공통:** 증분 수집 — DB에 저장된 마지막 날짜 다음 날부터 오늘까지만 수집한다. 최초 수집 시에는 과거 **400일** 치를 수집한다.
+
+**KR 세부:** pykrx `get_market_ohlcv(date_str, market=KOSPI/KOSDAQ)`를 날짜별로 호출. 0.5초 스로틀 적용.
+
+**US 세부:** NYSE+NASDAQ 활성 종목 전체를 하나의 `stock_map`으로 합쳐 Alpaca에 일괄 요청. 50종목씩 배치 분할 후 순차 호출. 200 calls/min 스로틀 적용.
 
 ### 벤치마크 지수
 
@@ -96,22 +102,41 @@ KIS에서 제공하는 마스터 파일. 인증 불필요, 매일 자동 업데�
 | 시장 | 1차 소스 | 2차 소스 (fallback) | 비고 |
 |------|----------|-------------------|------|
 | 한국 | pykrx (`PykrxClient`) | - | KRX 업종 인덱스 구성종목으로 매핑 |
-| 미국 | NASDAQ Screener API | Finnhub API | 1차 실패 시 개별 profile 조회 |
+| 미국 | NASDAQ Screener API | Finnhub API | 1차 후 NULL 잔여분에 한해 개별 profile 조회 |
 
-- NASDAQ Screener API: `https://api.nasdaq.com/api/screener/stocks?download=true&exchange={nasdaq|nyse}`
-- Finnhub API: `https://finnhub.io/api/v1/stock/profile2?symbol={symbol}` (환경변수: `FINNHUB_API_KEY`)
-- 12개 섹터 분류: Basic Materials, Consumer Discretionary, Consumer Staples, Energy, Finance, Health Care, Industrials, Miscellaneous, Real Estate, Technology, Telecommunications, Utilities
-- `sector` 값 정책: 유효 문자열 = 퀀트 대상, `'N/A'` = 비보통주(SPAC 등) 제외, `NULL` = 미분류 제외
-- 인증 불필요 (NASDAQ Screener), Free tier 60 req/min (Finnhub)
+**공통:** 섹터 수집은 증분 방식 — `sector IS NULL`인 종목만 대상으로 한다. 이미 섹터가 설정된 종목은 갱신하지 않는다.
+
+**KR 세부:**
+- pykrx `get_index_portfolio_deposit_file()`로 업종 인덱스별 구성종목을 순회하여 `{symbol: 업종명}` 맵 생성
+- SKIP_INDICES에 등록된 인덱스(시장 전체·섹터 복합 등)는 제외
+- 우선주(symbol 끝자리 5/7/9) → 보통주(끝자리 0) 심볼로 변환해 섹터 재매핑 시도
+
+**US 세부:**
+- NASDAQ Screener: `nasdaq`, `nyse` 두 거래소를 `ThreadPoolExecutor(max_workers=2)`로 병렬 요청
+  - URL: `https://api.nasdaq.com/api/screener/stocks` (params: `tableonly=true, limit=25000, exchange={nasdaq|nyse}, download=true`)
+- Finnhub: NASDAQ Screener 후에도 NULL인 종목만 대상으로 개별 `/stock/profile2` 호출
+  - `finnhubIndustry` 필드를 sector로 사용
+  - rate limit: 55 req/min (코드 설정 기준), 환경변수: `FINNHUB_API_KEY`
+
+**`sector` 값 정책:** 유효 문자열 = 퀀트 대상, `'N/A'` = 비보통주(SPAC 등) 제외, `NULL` = 미분류 제외
 
 ### 재무제표
 
 | 시장 | 수집 방식 | 비고 |
 |------|----------|------|
-| 한국 | DART API (`DartClient`) | 로컬에서 직접 수집 |
+| 한국 | DART API (`DartClient`) | `ThreadPoolExecutor(max_workers=10)` 병렬 배치 수집 |
 | 미국 | 마이크로서비스 위임 | SEC EDGAR companyfacts.zip 벌크 다운로드, US East에서 처리 |
 
-- US 마이크로서비스 환경변수: `USA_FS_COLLECTOR_URL`, `USA_FS_COLLECTOR_AUTH_KEY`
+**KR 수집 세부:**
+- DART `fetch_corp_codes()`로 symbol → dart_corp_code 매핑 (DB 미보유 시 자동 sync)
+- `shares_outstanding`은 DART가 아닌 pykrx `get_market_cap_by_ticker()`에서 별도 취득
+- CFS(연결재무제표) 우선, 미존재 시 OFS(개별재무제표) fallback
+- 기본 수집 범위: 직전 2개 회계연도 × 4개 보고서 유형(FY, Q1, Q2, Q3)
+
+**US 수집 세부:**
+- 폴링 간격: 30초, 최대 대기: 30분(1800초)
+- 폴링 응답에서 `phase`, `parsed/total` 진행 상황 로깅
+- 환경변수: `USA_FS_COLLECTOR_URL`, `USA_FS_COLLECTOR_AUTH_KEY`
 
 ---
 
@@ -136,37 +161,50 @@ python -m app.pipeline us-fs      # US 재무제표 수집 + 펀더멘털 재계
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  [Collect]                                                  │
-│      ├──▶ KIS mst 파일 → stocks 갱신 (KOSPI, KOSDAQ)       │
-│      ├──▶ pykrx 업종 인덱스 → stocks.sector 갱신           │
-│      ├──▶ pykrx → daily_prices 저장                        │
-│      ├──▶ pykrx → benchmark_daily_prices 저장              │
-│      ├──▶ ECOS API → risk_free_rates 저장                  │
-│      └──▶ 환율 API → exchange_rates 저장 (KRW/USD)         │
+│      ├──▶ KIS mst ZIP → stocks 갱신 (KOSPI, KOSDAQ)        │
+│      │    (type_code=ST 보통주만, is_skippable 스팩 등 제외) │
+│      ├──▶ pykrx 업종 인덱스 → sector=NULL 종목만 증분 갱신  │
+│      │    (우선주 5/7/9 → 보통주 0 fallback 매핑 포함)      │
+│      │    (실패해도 파이프라인 계속 진행)                   │
+│      ├──▶ pykrx → daily_prices 증분 저장 (날짜별 전 종목)  │
+│      │    (거래량=0 행 제외, 최초 수집 시 400일치)          │
+│      ├──▶ pykrx → benchmark_daily_prices 증분 저장         │
+│      ├──▶ ECOS API → risk_free_rates 증분 저장 (91D, 3Y, 10Y)│
+│      └──▶ ECOS API → exchange_rates 증분 저장 (USDKRW)     │
 │                                                             │
-│  [Progressive Deactivate]                                   │
+│  [Progressive Deactivate] (단일 트랜잭션)                   │
 │      ├──▶ 재상장 종목 is_active=true 복원                  │
 │      ├──▶ 가격 없는 종목 is_active=false                   │
 │      ├──▶ 섹터 없는 종목 is_active=false                   │
 │      └──▶ 재무제표 없는 종목 is_active=false               │
-│           (10% 미만 활성 시 safety check → 중단)           │
+│           ※ 활성 종목 10% 미만 시 rollback 후 이후 전체 중단│
 │                                                             │
-│  [Compute Fundamentals]                                     │
-│      └──▶ PER, PBR, EPS, BPS, ROE, 부채비율, 영업이익률    │
+│  [Load price_maps] DB에서 최대 300일 일봉 선로드 (공유)     │
+│                                                             │
+│  [Compute Fundamentals] ──── 실패 시 이후 전체 중단        │
+│      ├──▶ TTM 재무제표 → PER, PBR, EPS, BPS, ROE 등 계산   │
+│      └──▶ 재무제표 없는 종목은 NO_FS 행으로 삽입           │
 │                                                             │
 │  [Compute Factors] ★ 멀티팩터 리스크 모델                   │
-│      ├──▶ 팩터 노출도 계산 + 표준화 (MAD Winsorization)    │
-│      ├──▶ 시가총액 가중 WLS 횡단면 회귀 → 팩터 수익률      │
-│      └──▶ EWM 팩터 공분산 행렬 갱신                        │
+│      │    (Fundamentals 실패 시 skip)                       │
+│      ├──▶ 팩터 노출도 계산 + 시가총액 가중 Z-score 표준화  │
+│      ├──▶ 시가총액 가중 WLS 횡단면 회귀 → 팩터 수익률 저장 │
+│      └──▶ 누적 90일+ 시 EWM 팩터 공분산 행렬 갱신          │
 │                                                             │
-│  [Compute Indicators]                                       │
+│  [Compute Indicators] (Factors 실패 시 skip)               │
 │      ├──▶ 팩터 베타 (or OLS fallback) + 알파 + 샤프        │
 │      └──▶ 이동평균, RSI, MACD 등 23개 지표                 │
 │                                                             │
-│  [Sector Aggregates] 섹터별 중위수 PER, PBR, ROE 등        │
+│  [Sector Aggregates] (Fundamentals 성공 시)                 │
+│      └──▶ 섹터별 중위수 PER, PBR, ROE 등 → sector_aggregates│
 │                                                             │
-│  [Compute Risk Badges] → risk_badges 저장                  │
+│  [Compute Risk Badges] (Fundamentals 성공 시)               │
+│      └──▶ 5개 차원 점수 + 종합 tier → risk_badges          │
 │                                                             │
-│  [Integrity Check] 데이터 품질 보고 (읽기 전용)            │
+│  [Integrity Check] 데이터 품질 보고 (읽기 전용)             │
+│      └──▶ sector_null + sector_na > 20% 시 경고            │
+│                                                             │
+│  [Audit Log] 파이프라인 실행 결과 기록                      │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 
@@ -175,49 +213,68 @@ python -m app.pipeline us-fs      # US 재무제표 수집 + 펀더멘털 재계
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │  [Collect]                                                  │
-│      ├──▶ KIS cod 파일 → stocks 갱신 (NYSE, NASDAQ)        │
-│      ├──▶ NASDAQ Screener API → stocks.sector 갱신         │
-│      │    (NULL 잔여 → Finnhub fallback)                    │
-│      ├──▶ Alpaca → daily_prices 저장                       │
-│      ├──▶ yfinance → benchmark_daily_prices 저장           │
-│      └──▶ FRED API → risk_free_rates 저장                  │
+│      ├──▶ KIS cod ZIP → stocks 갱신 (NYSE, NASDAQ)         │
+│      │    (type_code=2 보통주만, is_valid_us_symbol 필터)   │
+│      ├──▶ NASDAQ Screener(nasdaq/nyse 병렬) → sector=NULL  │
+│      │    종목만 증분 갱신, Finnhub fallback (여전히 NULL인  │
+│      │    종목에 한해 개별 호출), (실패해도 계속 진행)       │
+│      ├──▶ Alpaca IEX → daily_prices 증분 저장              │
+│      │    (NYSE+NASDAQ 통합, 50종목 배치, 최초 수집 시 400일)│
+│      ├──▶ yfinance → benchmark_daily_prices 증분 저장      │
+│      └──▶ FRED API → risk_free_rates 증분 저장 (91D,1Y,3Y,10Y)│
 │                                                             │
-│  [Progressive Deactivate]                                   │
+│  [Progressive Deactivate] (단일 트랜잭션)                   │
 │      ├──▶ 재상장 종목 is_active=true 복원                  │
 │      ├──▶ 가격 없는 종목 is_active=false                   │
 │      ├──▶ 섹터 없는 종목 is_active=false                   │
 │      └──▶ 재무제표 없는 종목 is_active=false               │
-│           (10% 미만 활성 시 safety check → 중단)           │
+│           ※ 활성 종목 10% 미만 시 rollback 후 이후 전체 중단│
 │                                                             │
-│  [Compute Fundamentals]                                     │
-│      └──▶ PER, PBR, EPS, BPS, ROE, 부채비율, 영업이익률    │
+│  [Load price_maps] DB에서 최대 300일 일봉 선로드 (공유)     │
+│                                                             │
+│  [Compute Fundamentals] ──── 실패 시 이후 전체 중단        │
+│      ├──▶ TTM 재무제표 → PER, PBR, EPS, BPS, ROE 등 계산   │
+│      └──▶ 재무제표 없는 종목은 NO_FS 행으로 삽입           │
 │                                                             │
 │  [Compute Factors] ★ 멀티팩터 리스크 모델                   │
-│      ├──▶ 팩터 노출도 계산 + 표준화 (MAD Winsorization)    │
-│      ├──▶ 시가총액 가중 WLS 횡단면 회귀 → 팩터 수익률      │
-│      └──▶ EWM 팩터 공분산 행렬 갱신                        │
+│      │    (Fundamentals 실패 시 skip)                       │
+│      ├──▶ 팩터 노출도 계산 + 시가총액 가중 Z-score 표준화  │
+│      ├──▶ 시가총액 가중 WLS 횡단면 회귀 → 팩터 수익률 저장 │
+│      └──▶ 누적 90일+ 시 EWM 팩터 공분산 행렬 갱신          │
 │                                                             │
-│  [Compute Indicators]                                       │
+│  [Compute Indicators] (Factors 실패 시 skip)               │
 │      ├──▶ 팩터 베타 (or OLS fallback) + 알파 + 샤프        │
 │      └──▶ 이동평균, RSI, MACD 등 23개 지표                 │
 │                                                             │
-│  [Sector Aggregates] 섹터별 중위수 PER, PBR, ROE 등        │
+│  [Sector Aggregates] (Fundamentals 성공 시)                 │
+│      └──▶ 섹터별 중위수 PER, PBR, ROE 등 → sector_aggregates│
 │                                                             │
-│  [Compute Risk Badges] → risk_badges 저장                  │
+│  [Compute Risk Badges] (Fundamentals 성공 시)               │
+│      └──▶ 5개 차원 점수 + 종합 tier → risk_badges          │
 │                                                             │
-│  [Integrity Check] 데이터 품질 보고 (읽기 전용)            │
+│  [Integrity Check] 데이터 품질 보고 (읽기 전용)             │
+│      └──▶ sector_null + sector_na > 20% 시 경고            │
+│                                                             │
+│  [Audit Log] 파이프라인 실행 결과 기록                      │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────┐
-│              재무제표 수집 (별도 실행 가능)                  │
+│              재무제표 수집 (분기별 별도 실행)                │
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
-│  [KR] DART API → financial_statements 저장                  │
+│  [KR] DART API 다중배치 수집 (ThreadPoolExecutor, 10 workers)│
+│      ├──▶ DART corp_code 동기화 (없으면 자동 sync 먼저 실행)│
+│      ├──▶ pykrx get_market_cap_by_ticker → shares_outstanding│
+│      ├──▶ DART multi_financial_statement 병렬 fetch         │
+│      │    CFS(연결재무제표) 우선, 없으면 OFS(개별) fallback │
+│      └──▶ financial_statements 저장 → 펀더멘털 재계산       │
 │                                                             │
-│  [US] Calc Server → POST /collect → 마이크로서비스 트리거     │
-│       마이크로서비스: EDGAR ZIP 다운로드 → 파싱 → DB 저장   │
-│       Calc Server ← GET /status/:jobId 폴링으로 완료 확인    │
+│  [US] Calc Server → POST /collect → 마이크로서비스 트리거   │
+│       마이크로서비스: EDGAR ZIP 다운로드 → 파싱 → DB 저장  │
+│       Calc Server ← GET /status/:jobId 폴링               │
+│       (30초 간격, 최대 30분 대기)                          │
+│       완료 후 → 펀더멘털 재계산                            │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -248,18 +305,19 @@ python -m app.pipeline us-fs      # US 재무제표 수집 + 펀더멘털 재계
 | 팩터 | 산출 방식 | 출처 |
 |------|-----------|------|
 | Market | 절편 (intercept = 1) | - |
-| Size | log(종가 × 발행주식수) | daily_prices + financial_statements |
+| Size | log(종가 × 발행주식수) | daily_prices + stock_fundamentals |
 | Value | 1 / PBR | stock_fundamentals |
 | Momentum | 12개월 수익률 − 최근 1개월 수익률 | daily_prices |
-| Volatility | EWM 표준편차 (half-life=63일) | daily_prices |
-| Quality | ROE + 영업이익률 | stock_fundamentals |
+| Volatility | EWM 표준편차 (half-life=42일) | daily_prices |
+| Quality | (ROE Z-score + 영업이익률 Z-score) / 2 | stock_fundamentals |
 | Leverage | 부채비율 | stock_fundamentals |
 | Industry | 종목 sector 원-핫 인코딩 | stocks.sector |
 
-- 스타일 팩터는 MAD Winsorization 후 Z-score 표준화
+- 스타일 팩터는 Winsorization 후 시가총액 가중 Z-score 표준화
 - 횡단면 WLS 회귀 (시가총액 가중, 라그랑주 산업 제약)
 - EWM 공분산 (half-life=90일, numpy 직접 구현)
 - 팩터 수익률 90일 미만 시 OLS 베타 fallback
+- 유효 종목 30개 미만 시 해당 시장 팩터 계산 전체 skip
 
 ---
 
@@ -585,36 +643,40 @@ python -m app.pipeline us-fs      # US 재무제표 수집 + 펀더멘털 재계
 
 | 순서 | 단계 | 작업 | 설명 |
 |------|------|------|------|
-| 1 | Collect | 종목 목록 갱신 | KIS mst 파일 (KOSPI, KOSDAQ) |
-| 2 | Collect | KR 섹터 수집 | pykrx 업종 인덱스 매핑 |
-| 3 | Collect | KR 일봉 수집 | pykrx로 당일 전 종목 OHLCV |
+| 1 | Collect | 종목 목록 갱신 | KIS mst ZIP 파일 (KOSPI, KOSDAQ), 보통주(ST)만 취득 |
+| 2 | Collect | KR 섹터 수집 | pykrx 업종 인덱스 매핑, sector=NULL 종목만 증분 갱신 (우선주 fallback 포함, 실패해도 진행) |
+| 3 | Collect | KR 일봉 수집 | pykrx 날짜별 전 종목 일괄 조회, 증분 저장 (거래량=0 제외, 최초 400일) |
 | 4 | Collect | KR 벤치마크 수집 | pykrx로 KOSPI/KOSDAQ 지수 |
 | 5 | Collect | KR 무위험금리 수집 | ECOS API (91D, 3Y, 10Y) |
-| 6 | Collect | 환율 수집 | KRW/USD → exchange_rates |
-| 7 | Deactivate | Progressive 비활성화 | 재상장 복원 → 가격/섹터/재무제표 없는 종목 비활성화 (safety: 10% 미만 시 중단) |
-| 8 | Compute | KR 펀더멘털 계산 | PER, PBR, ROE 등 → stock_fundamentals |
-| 9 | Compute | KR 팩터 모델 | 노출도 → WLS 회귀 → 공분산 → factor_* 테이블 |
-| 10 | Compute | KR 지표 계산 | 팩터 베타 + 23개 지표 → stock_indicators |
-| 11 | Compute | KR 섹터 집계 | 섹터별 중위수 PER, PBR 등 → sector_aggregates |
-| 12 | Compute | KR 리스크뱃지 | 5개 차원 점수 + 종합 tier → risk_badges |
-| 13 | Check | 무결성 보고 | 데이터 품질 로그 (읽기 전용) |
+| 6 | Collect | 환율 수집 | ECOS API → exchange_rates (USDKRW) |
+| 7 | Deactivate | Progressive 비활성화 | 재상장 복원 → 가격/섹터/재무제표 없는 종목 비활성화 (단일 트랜잭션, safety: 10% 미만 시 rollback 후 중단) |
+| 8 | Load | price_maps 선로드 | 최대 300일 일봉을 DB에서 미리 로드 (이후 단계 공유) |
+| 9 | Compute | KR 펀더멘털 계산 | TTM 기준 PER, PBR, ROE 등 → stock_fundamentals (실패 시 이후 전체 중단) |
+| 10 | Compute | KR 팩터 모델 | 노출도 → WLS 회귀 → 공분산 → factor_* 테이블 (Fundamentals 실패 시 skip) |
+| 11 | Compute | KR 지표 계산 | 팩터 베타 + 23개 지표 → stock_indicators (Factors 실패 시 skip) |
+| 12 | Compute | KR 섹터 집계 | 섹터별 중위수 PER, PBR 등 → sector_aggregates (Fundamentals 성공 시) |
+| 13 | Compute | KR 리스크뱃지 | 5개 차원 점수 + 종합 tier → risk_badges (Fundamentals 성공 시) |
+| 14 | Check | 무결성 보고 | 데이터 품질 로그, sector 제외율 20% 초과 시 경고 |
+| 15 | Log | Audit 기록 | 각 단계 성공/실패 및 소요시간 → audit_logs |
 
 ### US 파이프라인 (09:00 KST)
 
 | 순서 | 단계 | 작업 | 설명 |
 |------|------|------|------|
-| 1 | Collect | 종목 목록 갱신 | KIS cod 파일 (NYSE, NASDAQ) |
-| 2 | Collect | US 섹터 수집 | NASDAQ Screener 벌크 + Finnhub fallback |
-| 3 | Collect | US 일봉 수집 | Alpaca API 배치 수집 |
+| 1 | Collect | 종목 목록 갱신 | KIS cod ZIP 파일 (NYSE, NASDAQ), type_code=2 보통주만 취득 |
+| 2 | Collect | US 섹터 수집 | NASDAQ Screener(nasdaq/nyse 병렬) + Finnhub fallback, sector=NULL 종목만 증분 갱신 (실패해도 진행) |
+| 3 | Collect | US 일봉 수집 | Alpaca IEX, NYSE+NASDAQ 통합 50종목 배치, 증분 저장 (최초 400일) |
 | 4 | Collect | US 벤치마크 수집 | yfinance로 S&P500/NASDAQ 지수 |
 | 5 | Collect | US 무위험금리 수집 | FRED API (91D, 1Y, 3Y, 10Y) |
-| 6 | Deactivate | Progressive 비활성화 | 재상장 복원 → 가격/섹터/재무제표 없는 종목 비활성화 (safety: 10% 미만 시 중단) |
-| 7 | Compute | US 펀더멘털 계산 | PER, PBR, ROE 등 → stock_fundamentals |
-| 8 | Compute | US 팩터 모델 | 노출도 → WLS 회귀 → 공분산 → factor_* 테이블 |
-| 9 | Compute | US 지표 계산 | 팩터 베타 + 23개 지표 → stock_indicators |
-| 10 | Compute | US 섹터 집계 | 섹터별 중위수 PER, PBR 등 → sector_aggregates |
-| 11 | Compute | US 리스크뱃지 | 5개 차원 점수 + 종합 tier → risk_badges |
-| 12 | Check | 무결성 보고 | 데이터 품질 로그 (읽기 전용) |
+| 6 | Deactivate | Progressive 비활성화 | 재상장 복원 → 가격/섹터/재무제표 없는 종목 비활성화 (단일 트랜잭션, safety: 10% 미만 시 rollback 후 중단) |
+| 7 | Load | price_maps 선로드 | 최대 300일 일봉을 DB에서 미리 로드 (이후 단계 공유) |
+| 8 | Compute | US 펀더멘털 계산 | TTM 기준 PER, PBR, ROE 등 → stock_fundamentals (실패 시 이후 전체 중단) |
+| 9 | Compute | US 팩터 모델 | 노출도 → WLS 회귀 → 공분산 → factor_* 테이블 (Fundamentals 실패 시 skip) |
+| 10 | Compute | US 지표 계산 | 팩터 베타 + 23개 지표 → stock_indicators (Factors 실패 시 skip) |
+| 11 | Compute | US 섹터 집계 | 섹터별 중위수 PER, PBR 등 → sector_aggregates (Fundamentals 성공 시) |
+| 12 | Compute | US 리스크뱃지 | 5개 차원 점수 + 종합 tier → risk_badges (Fundamentals 성공 시) |
+| 13 | Check | 무결성 보고 | 데이터 품질 로그, sector 제외율 20% 초과 시 경고 |
+| 14 | Log | Audit 기록 | 각 단계 성공/실패 및 소요시간 → audit_logs |
 
 ### 초기화 / 재무제표 수집 (별도 실행)
 
@@ -641,24 +703,21 @@ python -m app.pipeline us-fs      # US 재무제표 수집 + 펀더멘털 재계
 | 8/21 03:00 | `kr-fs`, `us-fs` | Q2/반기 | KR 반기보고서 8/14 마감, US 10-Q ~8/9 마감 |
 | 11/21 03:00 | `kr-fs`, `us-fs` | Q3 | KR 분기보고서 11/14 마감, US 10-Q ~11/9 마감 |
 
-### 스케줄러 구현 (`scheduler.py`)
+### 스케줄러 구현 (`app/scheduler.py`)
 
-APScheduler `BlockingScheduler`로 모든 스케줄을 Python 코드에 선언. Docker 컨테이너에서 `python scheduler.py`로 실행.
+APScheduler `BackgroundScheduler`로 모든 스케줄을 Python 코드에 선언.
 
 - 일일 파이프라인 2건: KR 18:00 Mon-Fri, US 09:00 Tue-Sat
 - 분기 재무제표 8건: 4개 날짜 × KR/US, 각각 개별 job으로 등록 (cartesian product 방지)
-- 헬스체크: `:8080`에 HTTP 서버 (Railway health check용)
-- 파이프라인은 `subprocess.run`으로 실행 (프로세스 격리)
-- APScheduler 기본 ThreadPoolExecutor(max_workers=20)가 동시 실행 처리
+- 파이프라인은 `PipelineOrchestrator` 메서드를 스레드 내에서 직접 호출 (subprocess 미사용)
 
 ### Railway 배포
 
-같은 repo에서 두 개 서비스로 운영:
+단일 서비스로 운영. `gunicorn.conf.py`의 `on_starting` 훅에서 `init_scheduler()`를 호출하므로, gunicorn master 프로세스 기동 시 BackgroundScheduler가 함께 시작된다.
 
 | 서비스 | Start Command | 포트 |
 |--------|---------------|------|
-| Web | `python run.py` | 5000 |
-| Scheduler | `python scheduler.py` | 8080 (health check only) |
+| Web + Scheduler | `gunicorn -c gunicorn.conf.py "app:create_app()"` | 8080 |
 
 ---
 
