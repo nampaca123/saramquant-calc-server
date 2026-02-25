@@ -459,6 +459,22 @@ create index if not exists refresh_tokens_active_idx
   on public.refresh_tokens (expires_at)
   where revoked_at is null;
 
+create table if not exists public.email_verification_codes (
+  id          uuid primary key default gen_random_uuid(),
+  email_hash  varchar(64)  not null,
+  purpose     varchar(20)  not null,
+  code        varchar(5)   not null,
+  attempts    int          not null default 0,
+  expires_at  timestamptz  not null,
+  verified    boolean      not null default false,
+  verified_at timestamptz,
+  created_at  timestamptz  not null default now()
+);
+
+create index if not exists idx_evc_lookup
+  on public.email_verification_codes (email_hash, purpose, verified)
+  where verified = false;
+
 do $do$
 begin
   if not exists (
