@@ -15,7 +15,6 @@
 | Calc Server | Flask (Python) | 데이터 수집, 퀀트 분석, 리스크 뱃지 파이프라인 |
 | US FS Collector | Nest.js (TypeScript) | US 재무제표 수집 마이크로서비스 (Railway US East) |
 | Database | Supabase (PostgreSQL) | 데이터 저장 |
-| Cache | Redis | API 응답 캐싱 |
 
 ### 마이크로서비스 구조
 
@@ -321,316 +320,7 @@ python -m app.pipeline us-fs      # US 재무제표 수집 + 펀더멘털 재계
 
 ---
 
-## 4. 데이터베이스 스키마
-
-### ERD
-
-```
-┌────────────────┐    ┌─────────────────┐
-│   stocks       │    │  daily_prices   │
-├────────────────┤    ├─────────────────┤
-│ id (PK)        │─┐  │ id (PK)         │
-│ symbol         │ │  │ stock_id (FK)   │
-│ name           │ ├─▶│ date            │
-│ market         │ │  │ open            │
-│ is_active      │ │  │ high            │
-│ dart_corp_code │ │  │ low             │
-│ sector         │ │  │ close           │
-│ created_at     │ │  │ volume          │
-│ updated_at     │ │  │ created_at      │
-└────────────────┘ │  └─────────────────┘
-                   │
-                   │  ┌─────────────────────┐
-                   │  │  stock_indicators   │
-                   │  ├─────────────────────┤
-                   ├─▶│ stock_id (PK, FK)   │
-                   │  │ date (PK)           │
-                   │  │ sma_20 .. sharpe    │
-                   │  │ created_at          │
-                   │  └─────────────────────┘
-                   │
-                   │  ┌───────────────────────────┐
-                   │  │   financial_statements    │
-                   │  ├───────────────────────────┤
-                   ├─▶│ id (PK)                   │
-                   │  │ stock_id (FK)             │
-                   │  │ fiscal_year               │
-                   │  │ report_type               │
-                   │  │ revenue .. shares_out      │
-                   │  │ created_at                │
-                   │  └───────────────────────────┘
-                   │
-                   │  ┌───────────────────────────┐
-                   │  │   stock_fundamentals      │
-                   │  ├───────────────────────────┤
-                   ├─▶│ stock_id (PK, FK)         │
-                   │  │ date (PK)                 │
-                   │  │ per .. operating_margin    │
-                   │  │ created_at                │
-                   │  └───────────────────────────┘
-                   │
-                   │  ┌─────────────────────┐
-                   │  │    predictions      │
-                   │  ├─────────────────────┤
-                   └─▶│ id (PK)             │
-                      │ stock_id (FK)       │
-                      │ date                │
-                      │ direction           │
-                      │ confidence          │
-                      │ actual_direction    │
-                      │ is_correct          │
-                      │ created_at          │
-                      └─────────────────────┘
-
-                   │
-                   │  ┌───────────────────────────┐
-                   │  │   factor_exposures        │
-                   │  ├───────────────────────────┤
-                   ├─▶│ stock_id (PK, FK)         │
-                   │  │ date (PK)                 │
-                   │  │ size_z .. leverage_z       │
-                   │  └───────────────────────────┘
-                   │
-                   │  ┌───────────────────────────┐
-                   │  │   factor_returns          │
-                   │  ├───────────────────────────┤
-                   │  │ market (PK)               │
-                   │  │ date (PK)                 │
-                   │  │ market_ret .. industry_*   │
-                   │  └───────────────────────────┘
-                   │
-                   │  ┌───────────────────────────┐
-                   │  │   factor_covariance       │
-                   │  ├───────────────────────────┤
-                   │  │ market (PK)               │
-                   │  │ date (PK)                 │
-                   │  │ matrix (JSONB)            │
-                   │  │ factor_names (TEXT[])      │
-                   │  └───────────────────────────┘
-
-┌───────────────────────────┐
-│   sector_aggregates       │
-├───────────────────────────┤
-│ market (PK)               │
-│ sector (PK)               │
-│ date (PK)                 │
-│ stock_count               │
-│ median_per .. median_*    │
-└───────────────────────────┘
-
-┌───────────────────────────┐   ┌───────────────────────────┐
-│     risk_badges           │   │  benchmark_daily_prices   │
-├───────────────────────────┤   ├───────────────────────────┤
-│ stock_id (PK, FK)         │   │ id (PK)                   │
-│ market                    │   │ benchmark                 │
-│ date                      │   │ date                      │
-│ summary_tier              │   │ close                     │
-│ dimensions (JSONB)        │   │ created_at                │
-│ updated_at                │   └───────────────────────────┘
-└───────────────────────────┘
-                                ┌───────────────────────────┐
-                                │    risk_free_rates        │
-                                ├───────────────────────────┤
-                                │ id (PK)                   │
-                                │ country                   │
-                                │ maturity                  │
-                                │ date                      │
-                                │ rate                      │
-                                │ created_at                │
-                                └───────────────────────────┘
-
-                                ┌───────────────────────────┐
-                                │    exchange_rates         │
-                                ├───────────────────────────┤
-                                │ id (PK)                   │
-                                │ pair (e.g. KRW/USD)       │
-                                │ date                      │
-                                │ rate                      │
-                                └───────────────────────────┘
-```
-
-### 테이블 상세
-
-#### stocks
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | BIGSERIAL | PK |
-| symbol | VARCHAR(20) | 종목 코드 |
-| name | TEXT | 종목명 |
-| market | market_type | KR_KOSPI, KR_KOSDAQ, US_NYSE, US_NASDAQ |
-| is_active | BOOLEAN | 활성 여부 |
-| dart_corp_code | VARCHAR(8) | DART 고유번호 (KR만 사용) |
-| sector | VARCHAR(100) | 섹터 분류 (KR: pykrx 업종, US: NASDAQ Screener) |
-| created_at | TIMESTAMPTZ | 생성일시 |
-| updated_at | TIMESTAMPTZ | 수정일시 |
-
-#### daily_prices
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | BIGSERIAL | PK |
-| stock_id | BIGINT | FK → stocks.id |
-| date | DATE | 거래일 |
-| open | NUMERIC(15,2) | 시가 |
-| high | NUMERIC(15,2) | 고가 |
-| low | NUMERIC(15,2) | 저가 |
-| close | NUMERIC(15,2) | 종가 |
-| volume | BIGINT | 거래량 |
-| created_at | TIMESTAMPTZ | 수집일시 |
-
-#### stock_indicators
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| stock_id | BIGINT | PK (복합), FK → stocks.id |
-| date | DATE | PK (복합), 기준 거래일 |
-| sma_20 | NUMERIC(15,4) | SMA 20일 |
-| ema_20 | NUMERIC(15,4) | EMA 20일 |
-| wma_20 | NUMERIC(15,4) | WMA 20일 |
-| rsi_14 | NUMERIC(8,4) | RSI 14일 |
-| macd | NUMERIC(15,4) | MACD 라인 |
-| macd_signal | NUMERIC(15,4) | MACD 시그널 |
-| macd_hist | NUMERIC(15,4) | MACD 히스토그램 |
-| stoch_k | NUMERIC(8,4) | 스토캐스틱 %K |
-| stoch_d | NUMERIC(8,4) | 스토캐스틱 %D |
-| bb_upper | NUMERIC(15,4) | 볼린저 상단 |
-| bb_middle | NUMERIC(15,4) | 볼린저 중앙 |
-| bb_lower | NUMERIC(15,4) | 볼린저 하단 |
-| atr_14 | NUMERIC(15,4) | ATR 14일 |
-| adx_14 | NUMERIC(8,4) | ADX 14일 |
-| plus_di | NUMERIC(8,4) | +DI |
-| minus_di | NUMERIC(8,4) | -DI |
-| obv | BIGINT | OBV |
-| vma_20 | BIGINT | 거래량 이동평균 20일 |
-| sar | NUMERIC(15,4) | Parabolic SAR |
-| beta | NUMERIC(8,4) | 베타 (vs 벤치마크) |
-| alpha | NUMERIC(8,4) | 젠센의 알파 |
-| sharpe | NUMERIC(8,4) | 샤프 비율 |
-| created_at | TIMESTAMPTZ | 생성일시 |
-
-#### financial_statements
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | BIGSERIAL | PK |
-| stock_id | BIGINT | FK → stocks.id |
-| fiscal_year | INT | 회계연도 |
-| report_type | report_type | ANNUAL, Q1, Q2, Q3 |
-| revenue | NUMERIC(20,2) | 매출액 |
-| operating_income | NUMERIC(20,2) | 영업이익 |
-| net_income | NUMERIC(20,2) | 순이익 |
-| total_assets | NUMERIC(20,2) | 총자산 |
-| total_liabilities | NUMERIC(20,2) | 총부채 |
-| total_equity | NUMERIC(20,2) | 총자본 |
-| shares_outstanding | BIGINT | 발행주식수 |
-| created_at | TIMESTAMPTZ | 수집일시 |
-
-#### stock_fundamentals
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| stock_id | BIGINT | PK (복합), FK → stocks.id |
-| date | DATE | PK (복합), 기준일 |
-| per | NUMERIC(12,4) | PER |
-| pbr | NUMERIC(12,4) | PBR |
-| eps | NUMERIC(15,4) | EPS |
-| bps | NUMERIC(15,4) | BPS |
-| roe | NUMERIC(10,4) | ROE |
-| debt_ratio | NUMERIC(10,4) | 부채비율 |
-| operating_margin | NUMERIC(10,4) | 영업이익률 |
-| data_coverage | data_coverage_type | FULL, PARTIAL, LOSS, NO_FS, INSUFFICIENT |
-| created_at | TIMESTAMPTZ | 생성일시 |
-
-#### risk_badges
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| stock_id | BIGINT | PK, FK → stocks.id |
-| market | market_type | KR_KOSPI, KR_KOSDAQ, US_NYSE, US_NASDAQ |
-| date | DATE | 기준일 |
-| summary_tier | VARCHAR(10) | 종합 리스크 등급 (LOW/MID/HIGH 등) |
-| dimensions | JSONB | 5개 차원 점수 (price_heat, volatility, trend, company_health, valuation) |
-| updated_at | TIMESTAMPTZ | 최종 갱신일시 |
-
-#### benchmark_daily_prices
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | BIGSERIAL | PK |
-| benchmark | benchmark_type | KR_KOSPI, KR_KOSDAQ, US_SP500, US_NASDAQ |
-| date | DATE | 거래일 |
-| close | NUMERIC(15,2) | 종가 |
-| created_at | TIMESTAMPTZ | 생성일시 |
-
-#### risk_free_rates
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | BIGSERIAL | PK |
-| country | country_type | KR, US |
-| maturity | maturity_type | 91D, 1Y, 3Y, 10Y |
-| date | DATE | 기준일 |
-| rate | NUMERIC(6,4) | 금리 (%) |
-| created_at | TIMESTAMPTZ | 생성일시 |
-
-#### exchange_rates
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| id | BIGSERIAL | PK |
-| pair | VARCHAR(7) | 통화쌍 (e.g. KRW/USD) |
-| date | DATE | 기준일 |
-| rate | NUMERIC(12,4) | 환율 |
-
-#### factor_exposures
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| stock_id | BIGINT | PK (복합), FK → stocks.id |
-| date | DATE | PK (복합), 기준일 |
-| size_z | NUMERIC(8,4) | Size 팩터 Z-score |
-| value_z | NUMERIC(8,4) | Value 팩터 Z-score |
-| momentum_z | NUMERIC(8,4) | Momentum 팩터 Z-score |
-| volatility_z | NUMERIC(8,4) | Volatility 팩터 Z-score |
-| quality_z | NUMERIC(8,4) | Quality 팩터 Z-score |
-| leverage_z | NUMERIC(8,4) | Leverage 팩터 Z-score |
-
-#### factor_returns
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| market | market_type | PK (복합), 시장 |
-| date | DATE | PK (복합), 기준일 |
-| factor_name | TEXT | PK (복합), 팩터명 |
-| return_value | NUMERIC(10,6) | 팩터 수익률 |
-
-#### factor_covariance
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| market | market_type | PK (복합), 시장 |
-| date | DATE | PK (복합), 기준일 |
-| matrix | JSONB | 팩터 공분산 행렬 (K×K) |
-| factor_names | TEXT[] | 팩터명 순서 배열 |
-
-#### sector_aggregates
-
-| 컬럼 | 타입 | 설명 |
-|------|------|------|
-| market | market_type | PK (복합), 시장 |
-| sector | VARCHAR(100) | PK (복합), 섹터명 |
-| date | DATE | PK (복합), 기준일 |
-| stock_count | INT | 해당 섹터 종목 수 |
-| median_per | NUMERIC(12,4) | PER 중위수 |
-| median_pbr | NUMERIC(12,4) | PBR 중위수 |
-| median_roe | NUMERIC(10,4) | ROE 중위수 |
-| median_operating_margin | NUMERIC(10,4) | 영업이익률 중위수 |
-| median_debt_ratio | NUMERIC(10,4) | 부채비율 중위수 |
-
----
-
-## 5. 스케줄러
+## 4. 스케줄러
 
 ### 파이프라인 스케줄
 
@@ -721,95 +411,355 @@ APScheduler `BackgroundScheduler`로 모든 스케줄을 Python 코드에 선언
 
 ---
 
-## 6. API 명세
+## 5. 퀀트 계산 엔진 상세 (`app/quant/`)
 
-### Gateway API (Spring Boot, Kotlin)
+### 디렉토리 구조
 
-**인증 / 사용자**
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/login/oauth2/code/{provider}` | OAuth 콜백 (Google, Kakao) |
-| POST | `/api/auth/signup` | Manual 회원가입 (email + password) |
-| POST | `/api/auth/login` | Manual 로그인 (email + password) |
-| POST | `/api/auth/refresh` | Access Token 재발급 |
-| POST | `/api/auth/logout` | 로그아웃 (현재 세션) |
-| POST | `/api/auth/logout-all` | 전체 세션 로그아웃 |
-| GET | `/api/users/me` | 내 프로필 |
-| PATCH | `/api/users/me` | 프로필 수정 |
-
-**대시보드 (Screener 통합)**
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/dashboard/stocks?market=&tier=&sector=&sort=&page=&size=` | 종목 카드 목록 |
-| GET | `/api/dashboard/sectors?market=` | 섹터 필터용 목록 |
-
-**종목 상세**
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/stocks/{symbol}?market=&lang=` | 종목 리포트 |
-| GET | `/api/stocks/{symbol}/prices?market=&period=` | OHLCV 시계열 |
-| GET | `/api/stocks/{symbol}/benchmark?market=&period=` | 벤치마크 비교 |
-| GET | `/api/stocks/{symbol}/ai-analysis?market=&preset=&lang=` | 캐시된 AI 분석 |
-
-**AI 전략 분석**
-| Method | Path | 설명 |
-|--------|------|------|
-| POST | `/api/ai/stock-analysis` | LLM 종목 분석 트리거 |
-| POST | `/api/ai/portfolio-analysis` | LLM 포트폴리오 진단 트리거 |
-| GET | `/api/ai/usage` | AI 사용량 조회 |
-
-**포트폴리오**
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/portfolios` | 포트폴리오 목록 |
-| GET | `/api/portfolios/{id}` | 포트폴리오 상세 |
-| POST | `/api/portfolios/{id}/buy` | 매수 |
-| POST | `/api/portfolios/{id}/sell/{holdingId}` | 매도 |
-
-**시뮬레이션 / 포트폴리오 분석**
-| Method | Path | 설명 |
-|--------|------|------|
-| GET | `/api/stocks/{symbol}/simulation` | 종목 몬테카를로 시뮬레이션 |
-| POST | `/api/portfolios/{id}/simulation` | 포트폴리오 몬테카를로 시뮬레이션 |
-| POST | `/api/portfolios/{id}/risk-score` | 리스크 점수 |
-| POST | `/api/portfolios/{id}/risk` | 리스크 분해 |
-| POST | `/api/portfolios/{id}/diversification` | 분산 효과 |
-
-### Calc Server Internal API (Flask, Python)
-
-| Method | Path | 설명 |
-|--------|------|------|
-| POST | `/internal/portfolios/risk-score` | 가중평균 리스크 스코어 |
-| POST | `/internal/portfolios/risk` | 공분산 리스크 분해 (MCAR) |
-| POST | `/internal/portfolios/diversification` | HHI, Effective N, 분산효과 비율 |
-| POST | `/internal/portfolios/price-lookup` | 날짜별 종가 + 환율 |
-| POST | `/internal/portfolios/<portfolio_id>/simulation` | 포트폴리오 몬테카를로 시뮬레이션 |
-| GET | `/internal/stocks/<symbol>/simulation` | 종목 몬테카를로 시뮬레이션 (GBM/Bootstrap) |
-
-> 시뮬레이션 공통 쿼리 파라미터: `days`, `simulations`, `confidence`, `lookback`, `method`
-> 종목 시뮬레이션 추가 파라미터: `market` (KR_KOSPI, KR_KOSDAQ, US_NYSE, US_NASDAQ)
-
-데이터 수집과 지표/리스크뱃지 일괄 계산은 API가 아닌 CLI 파이프라인으로 처리:
-
-```bash
-python -m app.pipeline kr|us|kr-initial|us-initial|kr-fs|us-fs
+```
+app/quant/
+├── fundamentals/          # 펀더멘털 지표 (7개)
+│   ├── valuation.py       #   EPS, BPS, PER, PBR
+│   ├── profitability.py   #   ROE, 영업이익률
+│   └── stability.py       #   부채비율
+├── indicators/            # 기술적 지표 (22개 출력 컬럼)
+│   ├── moving_average.py  #   SMA, EMA, WMA
+│   ├── momentum.py        #   RSI, MACD, Stochastic
+│   ├── volatility.py      #   Bollinger Bands, ATR
+│   ├── trend.py           #   ADX(+DI/-DI), Parabolic SAR
+│   ├── volume.py          #   OBV, VMA
+│   └── risk.py            #   Alpha, Sharpe (Beta는 factor_model에서)
+├── factor_model/          # 멀티팩터 리스크 모델 (Barra 방식)
+│   ├── exposure.py        #   팩터 노출도 계산 (6 style + industry)
+│   ├── normalize.py       #   Winsorize + Z-score 표준화
+│   ├── regression.py      #   제약 WLS 횡단면 회귀
+│   ├── covariance.py      #   EWM 팩터 공분산, 잔차 분산
+│   └── beta.py            #   Factor Beta, OLS Beta, 리스크 분해
+├── risk_badge/            # 리스크 뱃지 (5차원 + 종합)
+│   ├── badge_types.py     #   Tier/Direction enum, DimensionResult
+│   ├── badge_scoring.py   #   공통 유틸 (clamp, sector fallback)
+│   ├── dimension_price_heat.py      # 차원 1: 가격 과열도
+│   ├── dimension_volatility.py      # 차원 2: 변동성
+│   ├── dimension_trend.py           # 차원 3: 추세 강도
+│   ├── dimension_company_health.py  # 차원 4: 기업 건전성
+│   ├── dimension_valuation.py       # 차원 5: 밸류에이션
+│   └── composite_badge.py           # 종합 뱃지 판정
+├── portfolio/             # 포트폴리오 분석 (온디맨드 API)
+│   ├── hypothetical_returns.py      # 가상 수익률 구축
+│   ├── portfolio_risk_score.py      # 포트폴리오 리스크 점수
+│   ├── diversification.py           # 분산투자 지표 (HHI 등)
+│   ├── risk_contribution.py         # MCAR 기여도
+│   └── portfolio_metrics.py         # 팩터 기반 리스크 분해
+└── simulation/            # 몬테카를로 시뮬레이션 (온디맨드 API)
+    ├── path_generator.py            # 단일 종목 GBM / Bootstrap
+    ├── portfolio_path_generator.py  # 포트폴리오 상관 GBM / Bootstrap
+    └── monte_carlo.py               # VaR, CVaR, 백분위 통계
 ```
 
-### US Financial Statements Collector (Nest.js, 마이크로서비스)
+### 전체 지표 집계 (총 67개)
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| POST | `/usa-financial-statements/collect` | 수집 작업 트리거 → `{ jobId }` 반환 |
-| GET | `/usa-financial-statements/status/:jobId` | 작업 상태 조회 |
-| GET | `/usa-financial-statements/health` | 헬스 체크 |
+| 영역 | 지표 수 | 저장 위치 | 계산 시점 |
+|------|---------|-----------|-----------|
+| 펀더멘털 | 7 | `stock_fundamentals` | 파이프라인 (일일) |
+| 기술적 지표 | 22 | `stock_indicators` | 파이프라인 (일일) |
+| 팩터 모델 | 6 노출도 + 팩터 수익률 + 공분산 | `factor_exposures`, `factor_returns`, `factor_covariances` | 파이프라인 (일일) |
+| 섹터 집계 | 6 | `sector_aggregates` | 파이프라인 (일일) |
+| 리스크 뱃지 | 5 차원 점수 + 종합 tier | `risk_badges` | 파이프라인 (일일) |
+| 포트폴리오 분석 | 15+ | API 응답 (미저장) | 온디맨드 |
+| 시뮬레이션 | 5+ | API 응답 (미저장) | 온디맨드 |
 
 ---
 
-## 7. Redis 캐시
+### 5.1 펀더멘털 지표 (7개)
 
-| 키 패턴 | TTL | 설명 |
-|---------|-----|------|
-| `stock:list:{market}` | 1시간 | 종목 목록 |
-| `price:daily:{symbol}:{date}` | 24시간 | 일봉 데이터 |
-| `indicator:{symbol}:{date}` | 24시간 | 기술적 지표 |
-| `prediction:{symbol}:{date}` | 24시간 | ML 예측 결과 |
+서비스: `FundamentalService` → 저장: `stock_fundamentals` 테이블
+
+TTM(Trailing Twelve Months) 기준으로 손익계산서 항목을 합산한 뒤, 최신 종가와 대차대조표 데이터를 조합하여 산출한다.
+
+| # | 카테고리 | 지표 | 컬럼명 | 산출 공식 | 소스 |
+|---|---------|------|--------|-----------|------|
+| 1 | 밸류에이션 | EPS | `eps` | 당기순이익(TTM) ÷ 발행주식수 | `valuation.py` |
+| 2 | 밸류에이션 | BPS | `bps` | 자기자본 ÷ 발행주식수 | `valuation.py` |
+| 3 | 밸류에이션 | PER | `per` | 종가 ÷ EPS | `valuation.py` |
+| 4 | 밸류에이션 | PBR | `pbr` | 종가 ÷ BPS | `valuation.py` |
+| 5 | 수익성 | ROE | `roe` | 당기순이익(TTM) ÷ 자기자본 | `profitability.py` |
+| 6 | 수익성 | 영업이익률 | `operating_margin` | 영업이익(TTM) ÷ 매출액(TTM) | `profitability.py` |
+| 7 | 안정성 | 부채비율 | `debt_ratio` | 총부채 ÷ 자기자본 | `stability.py` |
+
+**TTM 계산 로직** (`FundamentalService._ttm_income`):
+- 최신 보고서가 FY(사업보고서)이면 해당 연간 값 그대로 사용
+- 분기보고서이면: FY값 + 올해 분기 누적 − 전년 동기 분기 누적 (= rolling 4분기)
+- 대차대조표(자기자본, 총부채)는 최신 스냅샷을 그대로 사용
+
+**이상치 처리**: PER ±1000, PBR 0~200, ROE ±10, 부채비율 0~100, 영업이익률 ±100 범위 외 → `None` 처리
+
+---
+
+### 5.2 기술적 지표 (22개 출력 컬럼)
+
+서비스: `IndicatorService` → 저장: `stock_indicators` 테이블
+
+최소 60일 가격 데이터를 요구하며, 모든 지표는 **최종 거래일의 값 1개**만 DB에 저장된다.
+
+| # | 카테고리 | 지표 | 컬럼명 | 파라미터 | 산출 방식 | 소스 |
+|---|---------|------|--------|----------|-----------|------|
+| 1 | 이동평균 | SMA | `sma_20` | 기간=20 | 단순 산술평균 | `moving_average.py` |
+| 2 | 이동평균 | EMA | `ema_20` | span=20 | 지수가중이동평균 (pandas ewm) | `moving_average.py` |
+| 3 | 이동평균 | WMA | `wma_20` | 기간=20 | 선형가중이동평균 (numpy convolve) | `moving_average.py` |
+| 4 | 모멘텀 | RSI | `rsi_14` | 기간=14 | EWM 기반 RS = avg_gain/avg_loss | `momentum.py` |
+| 5 | 모멘텀 | MACD | `macd` | 12/26 | EMA(12) − EMA(26) | `momentum.py` |
+| 6 | 모멘텀 | MACD Signal | `macd_signal` | signal=9 | MACD의 EMA(9) | `momentum.py` |
+| 7 | 모멘텀 | MACD Histogram | `macd_hist` | - | MACD − Signal | `momentum.py` |
+| 8 | 모멘텀 | Stochastic %K | `stoch_k` | K=14 | 100 × (종가−최저) / (최고−최저) | `momentum.py` |
+| 9 | 모멘텀 | Stochastic %D | `stoch_d` | D=3 | %K의 SMA(3) | `momentum.py` |
+| 10 | 변동성 | Bollinger Upper | `bb_upper` | 20일/2σ | SMA(20) + 2×표준편차 | `volatility.py` |
+| 11 | 변동성 | Bollinger Middle | `bb_middle` | 20일 | SMA(20) | `volatility.py` |
+| 12 | 변동성 | Bollinger Lower | `bb_lower` | 20일/2σ | SMA(20) − 2×표준편차 | `volatility.py` |
+| 13 | 변동성 | ATR | `atr_14` | 기간=14 | EWM(True Range), TR=max(H−L, |H−PC|, |L−PC|) | `volatility.py` |
+| 14 | 추세 | ADX | `adx_14` | 기간=14 | DX의 EWM 평활, DX = |+DI−-DI| / (+DI+-DI) × 100 | `trend.py` |
+| 15 | 추세 | +DI | `plus_di` | 기간=14 | EWM(+DM) / ATR × 100 | `trend.py` |
+| 16 | 추세 | −DI | `minus_di` | 기간=14 | EWM(−DM) / ATR × 100 | `trend.py` |
+| 17 | 추세 | Parabolic SAR | `sar` | AF=0.02~0.2 | 추세 반전 추적 (가속 인자 기반) | `trend.py` |
+| 18 | 거래량 | OBV | `obv` | - | Σ(방향 × 거래량), 방향=sign(종가 변화) | `volume.py` |
+| 19 | 거래량 | VMA | `vma_20` | 기간=20 | 거래량 SMA(20) | `volume.py` |
+| 20 | 리스크 | Beta | `beta` | - | Barra Factor Beta 우선, <90일 시 OLS Beta fallback | `factor_model/beta.py` |
+| 21 | 리스크 | Jensen's Alpha | `alpha` | 연환산 | R_stock − (Rf + β × (R_market − Rf)), ×252 | `risk.py` |
+| 22 | 리스크 | Sharpe Ratio | `sharpe` | 연환산 | (mean_return − Rf) / σ × √252 | `risk.py` |
+
+> Beta는 `FactorModelService.get_betas()`를 통해 Barra 팩터 베타를 먼저 조회하고, 팩터 수익률 누적 90일 미만이면 `ols_beta(Cov/Var)`로 fallback한다.
+
+---
+
+### 5.3 멀티팩터 리스크 모델 — Barra 방식 (6 스타일 팩터 + 산업 팩터)
+
+서비스: `FactorModelService` → 저장: `factor_exposures`, `factor_returns`, `factor_covariances` 테이블
+
+유효 종목 30개 미만 시 해당 시장 전체 skip.
+
+#### 5.3.1 팩터 노출도 (`exposure.py`)
+
+| # | 스타일 팩터 | 원시 값 산출 | 입력 데이터 |
+|---|-----------|-------------|-------------|
+| 1 | Size | log(종가 × 발행주식수) | `daily_prices` + `stock_fundamentals` |
+| 2 | Value | 1 / PBR | `stock_fundamentals` |
+| 3 | Momentum | 12개월 수익률 − 1개월 수익률 | `daily_prices` (252일, 21일) |
+| 4 | Volatility | EWM 표준편차 (half-life=42일) | `daily_prices` |
+| 5 | Quality | (ROE Z-score + 영업이익률 Z-score) / 2 | `stock_fundamentals` |
+| 6 | Leverage | 부채비율 | `stock_fundamentals` |
+| - | Industry | 종목 sector 원-핫 인코딩 (N개 열) | `stocks.sector` |
+
+**표준화 파이프라인** (`normalize.py`):
+1. MAD-based Winsorization: median ± 3×MAD (MAD × 1.4826 = σ 추정)
+2. 시가총액 가중 Z-score: weighted mean/std로 표준화 (가중치 = √시가총액)
+
+#### 5.3.2 횡단면 회귀 (`regression.py`)
+
+Constrained WLS (Weighted Least Squares) — KKT 시스템:
+
+```
+[X'WX  C] [f]   [X'Wy]
+[C'    0] [λ] = [  0  ]
+```
+
+- **y**: 초과수익률 (당일 수익률 − 무위험금리/252)
+- **X**: 설계행렬 [market(1) | styles(6) | industries(N)]
+- **W**: 시가총액 가중치 (√mcap)
+- **C**: 산업 팩터에 대한 라그랑주 제약 (시가총액 가중 합 = 0)
+- 결과: 팩터 수익률 벡터 `f`, 잔차(specific returns) = y − Xf
+
+#### 5.3.3 팩터 공분산 (`covariance.py`)
+
+- **팩터 공분산 행렬**: EWM 공분산, half-life=90일 (numpy 직접 구현)
+- **잔차 분산**: EWM per-stock specific variance, half-life=42일
+- 팩터 수익률 누적 90일 이상부터 갱신 시작
+
+#### 5.3.4 베타 & 리스크 분해 (`beta.py`)
+
+| 메트릭 | 공식 | 용도 |
+|--------|------|------|
+| Factor Beta | β_i = (X_i' Σ_F X_m) / (X_m' Σ_F X_m) | 주 Beta (≥90일 팩터 이력) |
+| OLS Beta | β = Cov(R_i, R_m) / Var(R_m) | Fallback (<90일) |
+| Risk Decomposition | Total Var = X_i' Σ_F X_i + σ²_specific | 팩터/잔차 리스크 비중 |
+
+---
+
+### 5.4 리스크 뱃지 (5차원 점수 + 종합 Tier)
+
+서비스: `RiskBadgeService` → 저장: `risk_badges` 테이블
+
+모든 차원은 **0~100 점수** → **STABLE(<40) / CAUTION(40~70) / WARNING(>70)** 3단계 tier로 변환된다.
+
+#### 5.4.1 차원별 상세
+
+| # | 차원 | 입력 지표 | 가중치 | 비교 기준 | 소스 |
+|---|------|----------|--------|-----------|------|
+| 1 | Price Heat (가격 과열) | RSI, Bollinger %B | RSI 60% + %B 40% | 절대 기준 | `dimension_price_heat.py` |
+| 2 | Volatility (변동성) | Beta, volatility_z | Beta 50% + vol_z 50% | 절대 기준 | `dimension_volatility.py` |
+| 3 | Trend (추세 강도) | ADX, +DI, −DI | ADX × 방향가중 | 하락=1.0, 상승=0.6 | `dimension_trend.py` |
+| 4 | Company Health (기업 건전성) | 부채비율, ROE, 영업이익률 | 부채 40% + ROE 30% + OPM 30% | 섹터 중위수 대비 | `dimension_company_health.py` |
+| 5 | Valuation (밸류에이션) | PER, PBR | PER 50% + PBR 50% | 섹터 중위수 대비 | `dimension_valuation.py` |
+
+**Direction 라벨** (차원 1, 2, 3에 부여):
+- `OVERHEATED` / `OVERSOLD` (RSI ≥70 / ≤30)
+- `UPTREND` / `DOWNTREND` (+DI vs −DI)
+- `NEUTRAL`
+
+#### 5.4.2 종합 뱃지 판정 (`composite_badge.py`)
+
+차원을 **Critical** (company_health, valuation)과 **Signal** (price_heat, volatility, trend)로 구분:
+
+| 우선순위 | 조건 | 종합 Tier |
+|---------|------|-----------|
+| 1 | Critical 차원 중 WARNING 존재 | **WARNING** |
+| 2 | Signal WARNING ≥ 2개 | **WARNING** |
+| 3 | Signal WARNING 1개 + 다른 차원 CAUTION 이상 | **WARNING** |
+| 4 | Signal WARNING 1개 단독 (상승 추세 단독 제외) | **CAUTION** (완화) |
+| 5 | Trend WARNING이 UPTREND인 경우 단독 | **CAUTION** (강한 상승추세는 경고 불필요) |
+| 6 | 그 외 | 유효 차원 중 최악 tier |
+
+#### 5.4.3 섹터 비교 기준
+
+- 섹터 집계 데이터 우선 사용, 해당 섹터 종목 수 < 5개이면 시장 전체 중위수로 fallback
+- `SectorAggregateService` → 저장: `sector_aggregates`
+
+| # | 집계 컬럼 | 산출 | 소스 테이블 |
+|---|----------|------|------------|
+| 1 | `median_per` | 섹터별 PER 중위수 | `stock_fundamentals` |
+| 2 | `median_pbr` | 섹터별 PBR 중위수 | `stock_fundamentals` |
+| 3 | `median_roe` | 섹터별 ROE 중위수 | `stock_fundamentals` |
+| 4 | `median_operating_margin` | 섹터별 영업이익률 중위수 | `stock_fundamentals` |
+| 5 | `median_debt_ratio` | 섹터별 부채비율 중위수 | `stock_fundamentals` |
+| 6 | `stock_count` | 섹터별 종목 수 | `stocks` |
+
+---
+
+### 5.5 포트폴리오 분석 (온디맨드 API)
+
+서비스: `PortfolioAnalysisService` → 저장 안 함 (API 응답으로 직접 반환)
+
+사용자 포트폴리오의 보유 종목 + 비중을 기반으로 아래 5가지 분석을 일괄 수행한다.
+
+#### 5.5.1 포트폴리오 리스크 점수 (`portfolio_risk_score.py`)
+
+| 메트릭 | 산출 | 비고 |
+|--------|------|------|
+| Portfolio Vol | σ_port × √252 (연환산) | 일별 수익률의 std |
+| Benchmark Vol | σ_bench × √252 | KOSPI(KR) 또는 S&P500(US) |
+| Risk Score | (Portfolio Vol / Benchmark Vol) × 50, max=100 | 벤치마크 대비 상대 변동성 |
+| Tier | STABLE(≤40) / CAUTION(40~70) / WARNING(>70) | 리스크 뱃지와 동일 기준 |
+
+최소 20 거래일 데이터 필요, 미달 시 `UNKNOWN`.
+
+#### 5.5.2 분산투자 지표 (`diversification.py`)
+
+| # | 지표 | 산출 | 의미 |
+|---|------|------|------|
+| 1 | HHI | Σ(w_i²) | 집중도 (0~1, 낮을수록 분산) |
+| 2 | Effective N | 1 / HHI | 실효 종목 수 |
+| 3 | Max Weight | max(w_i) | 최대 단일 비중 |
+| 4 | Diversification Ratio | Σ(w_i × σ_i) / σ_port | >1이면 분산 효과 존재 |
+| 5 | Sector Concentration | 섹터별 비중 합산 | 섹터 쏠림 파악 |
+| 6 | Sector HHI | Σ(sector_weight²) | 섹터 집중도 |
+
+#### 5.5.3 리스크 기여도 — MCAR (`risk_contribution.py`)
+
+| 메트릭 | 산출 |
+|--------|------|
+| Portfolio Vol | √(w' Σ w) |
+| Marginal Contribution (MCAR) | Σw / σ_port (공분산 행렬 × 비중 / 포트폴리오 변동성) |
+| Contribution | w_i × MCAR_i |
+| Contribution % | Contribution_i / Σ(Contribution) |
+
+#### 5.5.4 팩터 리스크 분해 (`portfolio_metrics.py`)
+
+DB에 저장된 팩터 모델 데이터를 활용하여 포트폴리오 수준의 리스크를 분해한다.
+
+| 출력 | 설명 |
+|------|------|
+| Portfolio Beta | 가중 팩터 베타 |
+| Factor / Specific Var | X_p' Σ_F X_p + Σ(w² σ²_specific) |
+| Factor % | 팩터 리스크 비중 |
+| Portfolio Exposure | 팩터별 가중 노출도 |
+
+#### 5.5.5 벤치마크 비교
+
+| 출력 | 설명 |
+|------|------|
+| Portfolio Return | 가중 누적 수익률 (%) |
+| Benchmark Return | KOSPI 또는 S&P500 누적 수익률 (%) |
+| Excess Return | Portfolio − Benchmark (%) |
+| Benchmark Chart | 일별 누적 수익률 시계열 (portfolio vs benchmark) |
+
+---
+
+### 5.6 몬테카를로 시뮬레이션 (온디맨드 API)
+
+서비스: `SimulationService` (단일 종목), `PortfolioSimulationService` (포트폴리오) → 저장 안 함
+
+#### 5.6.1 경로 생성 방식
+
+| # | 방식 | 적용 대상 | 알고리즘 | 소스 |
+|---|------|-----------|----------|------|
+| 1 | GBM | 단일 종목 | 기하 브라운 운동, antithetic variates | `path_generator.py` |
+| 2 | Bootstrap | 단일 종목 | 과거 수익률 복원추출 | `path_generator.py` |
+| 3 | Correlated GBM | 포트폴리오 | 종목 간 상관관계 반영 (Cholesky 분해) | `portfolio_path_generator.py` |
+| 4 | Portfolio Bootstrap | 포트폴리오 | 다종목 동시 복원추출 (교차상관 보존) | `portfolio_path_generator.py` |
+
+**GBM 공식**: dS = S(μdt + σdW), μ/σ는 과거 로그수익률에서 추정
+**Antithetic Variates**: Z와 −Z를 짝으로 생성하여 분산 감소
+**Nearest PD 보정**: 상관행렬이 양정치가 아닌 경우 고유값 보정 후 Cholesky 분해
+
+#### 5.6.2 시뮬레이션 통계 (`monte_carlo.py`)
+
+| # | 메트릭 | 산출 |
+|---|--------|------|
+| 1 | Expected Return | (평균 최종가 − 초기가) / 초기가 |
+| 2 | VaR (Value at Risk) | 수익률 분포의 (1−confidence) 백분위 (기본 95%) |
+| 3 | CVaR (Conditional VaR) | VaR 이하 수익률의 평균 (= Expected Shortfall) |
+| 4 | Price Percentiles | 최종 가격의 10/25/50/75/90 백분위 |
+| 5 | Path Percentiles | 전 시뮬레이션 기간의 일별 10/25/50/75/90 백분위 시계열 |
+
+기본 설정: 10,000 시뮬레이션, 60일 예측, 95% 신뢰구간, 252일 lookback.
+
+---
+
+### 5.7 지표 데이터 흐름 요약
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                    파이프라인 계산 (일일 저장)                        │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  재무제표(TTM)──▶ [Fundamentals] ──▶ stock_fundamentals (7개 지표)   │
+│       │                │                                             │
+│       │                ├──▶ [Sector Aggregates] ──▶ sector_aggregates│
+│       │                │         (6개 중위수)                        │
+│       │                ▼                                             │
+│  가격 데이터 ──▶ [Factor Model] ──▶ factor_exposures  (6 스타일)     │
+│       │              │         ──▶ factor_returns    (K 팩터)        │
+│       │              │         ──▶ factor_covariances (K×K 행렬)     │
+│       │              │                                               │
+│       │              ├── factor_beta ──┐                             │
+│       │              │                 ▼                             │
+│       └──────────▶ [Indicators] ──▶ stock_indicators (22개 지표)     │
+│                                                                      │
+│  위 결과 전부 ──▶ [Risk Badge] ──▶ risk_badges                      │
+│                     (5차원 점수 + 종합 tier)                         │
+│                                                                      │
+├──────────────────────────────────────────────────────────────────────┤
+│                   온디맨드 API 계산 (미저장)                         │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  포트폴리오 보유 ──▶ [Portfolio Analysis]                            │
+│       │                ├── Risk Score (벤치마크 대비 변동성)          │
+│       │                ├── Diversification (HHI, Effective N 등)     │
+│       │                ├── MCAR (종목별 리스크 기여도)               │
+│       │                ├── Factor Risk (팩터 리스크 분해)            │
+│       │                └── Benchmark Comparison (수익률 비교)        │
+│       │                                                              │
+│       └──────────▶ [Simulation]                                      │
+│                        ├── GBM / Bootstrap 경로 생성                 │
+│                        └── VaR, CVaR, 백분위 통계                    │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
