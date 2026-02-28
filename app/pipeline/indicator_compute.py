@@ -21,15 +21,18 @@ _CHUNK_SIZE = 250
 
 def _compute_chunk(
     args: tuple[list[tuple[int, list[tuple]]], pd.Series | None, float, dict[int, float | None]],
-) -> list[tuple]:
+) -> tuple[list[tuple], list[int]]:
     stock_batch, bench_ret, rf_rate, factor_betas = args
-    rows = []
+    rows, failed = [], []
     for stock_id, raw_prices in stock_batch:
-        df = IndicatorService.build_dataframe(raw_prices)
-        if df is not None:
-            fb = factor_betas.get(stock_id)
-            rows.append(IndicatorService.compute(stock_id, df, bench_ret, rf_rate, fb))
-    return rows
+        try:
+            df = IndicatorService.build_dataframe(raw_prices)
+            if df is not None:
+                fb = factor_betas.get(stock_id)
+                rows.append(IndicatorService.compute(stock_id, df, bench_ret, rf_rate, fb))
+        except Exception:
+            failed.append(stock_id)
+    return rows, failed
 
 
 class IndicatorComputeEngine:
@@ -83,10 +86,17 @@ class IndicatorComputeEngine:
         args = [(c, bench_ret, rf_rate, factor_betas) for c in chunks]
 
         rows: list[tuple] = []
+        failed: list[int] = []
         with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as pool:
-            for batch in pool.map(_compute_chunk, args):
-                rows.extend(batch)
+            for batch_rows, batch_failed in pool.map(_compute_chunk, args):
+                rows.extend(batch_rows)
+                failed.extend(batch_failed)
 
+        if failed:
+            logger.warning(
+                f"[Compute] {market.value}: {len(failed)} stocks failed: "
+                f"{failed[:20]}"
+            )
         fb_used = sum(1 for sid in price_map if sid in factor_betas)
         logger.info(
             f"[Compute] {market.value}: {len(rows)}/{len(price_map)} stocks computed "
