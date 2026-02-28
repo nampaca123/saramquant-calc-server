@@ -1,4 +1,6 @@
 import logging
+import os
+from concurrent.futures import ProcessPoolExecutor
 
 import pandas as pd
 from psycopg2.extensions import connection
@@ -12,6 +14,22 @@ from app.services.factor_model_service import FactorModelService
 from app.utils import load_benchmark_returns, load_risk_free_rates
 
 logger = logging.getLogger(__name__)
+
+_MAX_WORKERS = min(4, os.cpu_count() or 4)
+_CHUNK_SIZE = 250
+
+
+def _compute_chunk(
+    args: tuple[list[tuple[int, list[tuple]]], pd.Series | None, float, dict[int, float | None]],
+) -> list[tuple]:
+    stock_batch, bench_ret, rf_rate, factor_betas = args
+    rows = []
+    for stock_id, raw_prices in stock_batch:
+        df = IndicatorService.build_dataframe(raw_prices)
+        if df is not None:
+            fb = factor_betas.get(stock_id)
+            rows.append(IndicatorService.compute(stock_id, df, bench_ret, rf_rate, fb))
+    return rows
 
 
 class IndicatorComputeEngine:
@@ -60,18 +78,18 @@ class IndicatorComputeEngine:
         rf_rate = rf_rates.get(market_to_country(market), 3.0)
         factor_betas = self._factor_service.get_betas(market)
 
+        items = list(price_map.items())
+        chunks = [items[i:i + _CHUNK_SIZE] for i in range(0, len(items), _CHUNK_SIZE)]
+        args = [(c, bench_ret, rf_rate, factor_betas) for c in chunks]
+
         rows: list[tuple] = []
-        for i, (stock_id, raw_prices) in enumerate(price_map.items(), 1):
-            df = IndicatorService.build_dataframe(raw_prices)
-            if df is not None:
-                fb = factor_betas.get(stock_id)
-                rows.append(IndicatorService.compute(stock_id, df, bench_ret, rf_rate, fb))
-            if i % 500 == 0:
-                logger.info(f"[Compute] {market.value}: {i}/{len(price_map)} stocks")
+        with ProcessPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            for batch in pool.map(_compute_chunk, args):
+                rows.extend(batch)
 
         fb_used = sum(1 for sid in price_map if sid in factor_betas)
         logger.info(
             f"[Compute] {market.value}: {len(rows)}/{len(price_map)} stocks computed "
-            f"({fb_used} factor betas)"
+            f"({fb_used} factor betas, {_MAX_WORKERS} workers)"
         )
         return rows

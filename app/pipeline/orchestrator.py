@@ -81,7 +81,11 @@ class PipelineOrchestrator:
         if not self._progressive_deactivate(markets):
             return
 
+        load_start = time.monotonic()
         price_maps = self._load_prices(markets)
+        steps.append(StepResult(
+            "load_prices", True, int((time.monotonic() - load_start) * 1000),
+        ))
 
         fund = self._safe_step("fundamentals", self._compute_fundamentals, region, price_maps)
         steps.append(fund)
