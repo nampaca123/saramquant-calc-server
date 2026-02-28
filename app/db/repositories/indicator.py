@@ -1,20 +1,21 @@
 from psycopg2.extensions import connection
-from psycopg2.extras import execute_values, RealDictCursor
+from psycopg2.extras import RealDictCursor
 from app.schema import Market
 
-
-COLUMNS = [
-    "stock_id", "date",
-    "sma_20", "ema_20", "wma_20",
-    "rsi_14",
-    "macd", "macd_signal", "macd_hist",
-    "stoch_k", "stoch_d",
-    "bb_upper", "bb_middle", "bb_lower",
-    "atr_14", "adx_14", "plus_di", "minus_di",
-    "obv", "vma_20",
-    "sar",
-    "beta", "alpha", "sharpe",
+_COL_TYPES = [
+    ("stock_id", "bigint"), ("date", "date"),
+    ("sma_20", "numeric"), ("ema_20", "numeric"), ("wma_20", "numeric"),
+    ("rsi_14", "numeric"),
+    ("macd", "numeric"), ("macd_signal", "numeric"), ("macd_hist", "numeric"),
+    ("stoch_k", "numeric"), ("stoch_d", "numeric"),
+    ("bb_upper", "numeric"), ("bb_middle", "numeric"), ("bb_lower", "numeric"),
+    ("atr_14", "numeric"), ("adx_14", "numeric"), ("plus_di", "numeric"), ("minus_di", "numeric"),
+    ("obv", "bigint"), ("vma_20", "bigint"),
+    ("sar", "numeric"),
+    ("beta", "numeric"), ("alpha", "numeric"), ("sharpe", "numeric"),
 ]
+COLUMNS = [c for c, _ in _COL_TYPES]
+_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _COL_TYPES)
 
 
 class IndicatorRepository:
@@ -36,10 +37,13 @@ class IndicatorRepository:
     def insert_batch(self, rows: list[tuple]) -> int:
         if not rows:
             return 0
-        col_names = ", ".join(COLUMNS)
-        query = f"INSERT INTO stock_indicators ({col_names}) VALUES %s"
+        cols = [list(c) for c in zip(*rows)]
         with self._conn.cursor() as cur:
-            execute_values(cur, query, rows)
+            cur.execute(
+                f"INSERT INTO stock_indicators ({', '.join(COLUMNS)}) "
+                f"SELECT * FROM UNNEST({_UNNEST})",
+                cols,
+            )
             return cur.rowcount
 
     def get_latest_by_stock(self, stock_id: int) -> dict | None:

@@ -2,9 +2,33 @@ import json
 from datetime import date
 
 from psycopg2.extensions import connection
-from psycopg2.extras import execute_values, RealDictCursor
+from psycopg2.extras import RealDictCursor
 
 from app.schema import Market
+
+_EXPOSURE_COL_TYPES = [
+    ("stock_id", "bigint"), ("date", "date"),
+    ("size_z", "numeric"), ("value_z", "numeric"), ("momentum_z", "numeric"),
+    ("volatility_z", "numeric"), ("quality_z", "numeric"), ("leverage_z", "numeric"),
+]
+_EXPOSURE_COLS = [c for c, _ in _EXPOSURE_COL_TYPES]
+_EXPOSURE_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _EXPOSURE_COL_TYPES)
+
+_RETURN_COL_TYPES = [
+    ("market", "market_type"), ("date", "date"),
+    ("factor_name", "varchar"), ("return_value", "numeric"),
+]
+_RETURN_COLS = [c for c, _ in _RETURN_COL_TYPES]
+_RETURN_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _RETURN_COL_TYPES)
+
+_SECTOR_AGG_COL_TYPES = [
+    ("market", "market_type"), ("sector", "varchar"), ("date", "date"),
+    ("stock_count", "int"),
+    ("median_per", "numeric"), ("median_pbr", "numeric"), ("median_roe", "numeric"),
+    ("median_operating_margin", "numeric"), ("median_debt_ratio", "numeric"),
+]
+_SECTOR_AGG_COLS = [c for c, _ in _SECTOR_AGG_COL_TYPES]
+_SECTOR_AGG_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _SECTOR_AGG_COL_TYPES)
 
 
 class FactorRepository:
@@ -17,20 +41,17 @@ class FactorRepository:
         """rows: [(stock_id, date, size_z, value_z, momentum_z, volatility_z, quality_z, leverage_z)]"""
         if not rows:
             return 0
-        query = """
-            INSERT INTO factor_exposures
-                (stock_id, date, size_z, value_z, momentum_z, volatility_z, quality_z, leverage_z)
-            VALUES %s
-            ON CONFLICT (stock_id, date) DO UPDATE SET
-                size_z = EXCLUDED.size_z,
-                value_z = EXCLUDED.value_z,
-                momentum_z = EXCLUDED.momentum_z,
-                volatility_z = EXCLUDED.volatility_z,
-                quality_z = EXCLUDED.quality_z,
-                leverage_z = EXCLUDED.leverage_z
-        """
+        cols = [list(c) for c in zip(*rows)]
         with self._conn.cursor() as cur:
-            execute_values(cur, query, rows, page_size=2000)
+            cur.execute(
+                f"INSERT INTO factor_exposures ({', '.join(_EXPOSURE_COLS)}) "
+                f"SELECT * FROM UNNEST({_EXPOSURE_UNNEST}) "
+                "ON CONFLICT (stock_id, date) DO UPDATE SET "
+                "size_z = EXCLUDED.size_z, value_z = EXCLUDED.value_z, "
+                "momentum_z = EXCLUDED.momentum_z, volatility_z = EXCLUDED.volatility_z, "
+                "quality_z = EXCLUDED.quality_z, leverage_z = EXCLUDED.leverage_z",
+                cols,
+            )
             return cur.rowcount
 
     def get_latest_exposures(self, market: Market) -> list[tuple]:
@@ -57,14 +78,15 @@ class FactorRepository:
         """rows: [(market, date, factor_name, return_value)]"""
         if not rows:
             return 0
-        query = """
-            INSERT INTO factor_returns (market, date, factor_name, return_value)
-            VALUES %s
-            ON CONFLICT (market, date, factor_name) DO UPDATE SET
-                return_value = EXCLUDED.return_value
-        """
+        cols = [list(c) for c in zip(*rows)]
         with self._conn.cursor() as cur:
-            execute_values(cur, query, rows, page_size=2000)
+            cur.execute(
+                f"INSERT INTO factor_returns ({', '.join(_RETURN_COLS)}) "
+                f"SELECT * FROM UNNEST({_RETURN_UNNEST}) "
+                "ON CONFLICT (market, date, factor_name) DO UPDATE SET "
+                "return_value = EXCLUDED.return_value",
+                cols,
+            )
             return cur.rowcount
 
     def get_factor_returns_history(
@@ -220,20 +242,17 @@ class FactorRepository:
     def upsert_sector_aggregates(self, rows: list[tuple]) -> int:
         if not rows:
             return 0
-        query = """
-            INSERT INTO sector_aggregates
-                (market, sector, date, stock_count,
-                 median_per, median_pbr, median_roe,
-                 median_operating_margin, median_debt_ratio)
-            VALUES %s
-            ON CONFLICT (market, sector, date) DO UPDATE SET
-                stock_count = EXCLUDED.stock_count,
-                median_per = EXCLUDED.median_per,
-                median_pbr = EXCLUDED.median_pbr,
-                median_roe = EXCLUDED.median_roe,
-                median_operating_margin = EXCLUDED.median_operating_margin,
-                median_debt_ratio = EXCLUDED.median_debt_ratio
-        """
+        cols = [list(c) for c in zip(*rows)]
         with self._conn.cursor() as cur:
-            execute_values(cur, query, rows)
+            cur.execute(
+                f"INSERT INTO sector_aggregates ({', '.join(_SECTOR_AGG_COLS)}) "
+                f"SELECT * FROM UNNEST({_SECTOR_AGG_UNNEST}) "
+                "ON CONFLICT (market, sector, date) DO UPDATE SET "
+                "stock_count = EXCLUDED.stock_count, "
+                "median_per = EXCLUDED.median_per, median_pbr = EXCLUDED.median_pbr, "
+                "median_roe = EXCLUDED.median_roe, "
+                "median_operating_margin = EXCLUDED.median_operating_margin, "
+                "median_debt_ratio = EXCLUDED.median_debt_ratio",
+                cols,
+            )
             return cur.rowcount

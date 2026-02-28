@@ -1,39 +1,54 @@
 from datetime import date
 from psycopg2.extensions import connection
-from psycopg2.extras import execute_values
 from app.schema import DailyPrice, Market
+
+_COL_TYPES = [
+    ("stock_id", "bigint"), ("date", "date"),
+    ("open", "numeric"), ("high", "numeric"), ("low", "numeric"),
+    ("close", "numeric"), ("volume", "bigint"),
+]
+_COLS = [c for c, _ in _COL_TYPES]
+_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _COL_TYPES)
+_UPSERT_CONFLICT = (
+    "ON CONFLICT (stock_id, date) DO UPDATE SET "
+    "open = EXCLUDED.open, high = EXCLUDED.high, "
+    "low = EXCLUDED.low, close = EXCLUDED.close, volume = EXCLUDED.volume"
+)
 
 
 class DailyPriceRepository:
     def __init__(self, conn: connection):
         self._conn = conn
 
-    _UPSERT_SQL = """
-        INSERT INTO daily_prices (stock_id, date, open, high, low, close, volume)
-        VALUES %s
-        ON CONFLICT (stock_id, date) DO UPDATE SET
-            open = EXCLUDED.open, high = EXCLUDED.high,
-            low = EXCLUDED.low, close = EXCLUDED.close,
-            volume = EXCLUDED.volume
-    """
+    def _unnest_upsert(self, cols: list[list]) -> int:
+        with self._conn.cursor() as cur:
+            cur.execute(
+                f"INSERT INTO daily_prices ({', '.join(_COLS)}) "
+                f"SELECT * FROM UNNEST({_UNNEST}) "
+                f"{_UPSERT_CONFLICT}",
+                cols,
+            )
+            return cur.rowcount
 
     def upsert_batch(self, stock_id: int, prices: list[DailyPrice]) -> int:
         if not prices:
             return 0
-        data = [
-            (stock_id, p.date, p.open, p.high, p.low, p.close, p.volume)
-            for p in prices
+        cols = [
+            [stock_id] * len(prices),
+            [p.date for p in prices],
+            [p.open for p in prices],
+            [p.high for p in prices],
+            [p.low for p in prices],
+            [p.close for p in prices],
+            [p.volume for p in prices],
         ]
-        with self._conn.cursor() as cur:
-            execute_values(cur, self._UPSERT_SQL, data)
-            return cur.rowcount
+        return self._unnest_upsert(cols)
 
     def bulk_upsert(self, rows: list[tuple]) -> int:
         if not rows:
             return 0
-        with self._conn.cursor() as cur:
-            execute_values(cur, self._UPSERT_SQL, rows, page_size=5000)
-            return cur.rowcount
+        cols = [list(c) for c in zip(*rows)]
+        return self._unnest_upsert(cols)
 
     def get_latest_date(self, stock_id: int) -> date | None:
         query = "SELECT MAX(date) FROM daily_prices WHERE stock_id = %s"

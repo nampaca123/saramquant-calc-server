@@ -1,14 +1,16 @@
 from psycopg2.extensions import connection
-from psycopg2.extras import execute_values, RealDictCursor
+from psycopg2.extras import RealDictCursor
 
 from app.schema import Market
 
-COLUMNS = [
-    "stock_id", "date",
-    "per", "pbr", "eps", "bps",
-    "roe", "debt_ratio", "operating_margin",
-    "data_coverage",
+_COL_TYPES = [
+    ("stock_id", "bigint"), ("date", "date"),
+    ("per", "numeric"), ("pbr", "numeric"), ("eps", "numeric"), ("bps", "numeric"),
+    ("roe", "numeric"), ("debt_ratio", "numeric"), ("operating_margin", "numeric"),
+    ("data_coverage", "data_coverage_type"),
 ]
+COLUMNS = [c for c, _ in _COL_TYPES]
+_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _COL_TYPES)
 
 
 class FundamentalRepository:
@@ -30,11 +32,14 @@ class FundamentalRepository:
     def insert_batch(self, rows: list[tuple]) -> int:
         if not rows:
             return 0
-        col_names = ", ".join(COLUMNS)
-        query = f"INSERT INTO stock_fundamentals ({col_names}) VALUES %s"
+        cols = [list(c) for c in zip(*rows)]
         with self._conn.cursor() as cur:
-            execute_values(cur, query, rows)
-            return len(rows)
+            cur.execute(
+                f"INSERT INTO stock_fundamentals ({', '.join(COLUMNS)}) "
+                f"SELECT * FROM UNNEST({_UNNEST})",
+                cols,
+            )
+            return cur.rowcount
 
     def get_with_shares(self, stock_ids: list[int]) -> list[tuple]:
         """Returns [(stock_id, pbr, roe, operating_margin, debt_ratio, shares_outstanding)]."""

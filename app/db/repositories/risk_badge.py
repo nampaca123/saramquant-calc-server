@@ -1,7 +1,14 @@
 import json
 
 from psycopg2.extensions import connection
-from psycopg2.extras import execute_values, RealDictCursor
+from psycopg2.extras import RealDictCursor
+
+_COL_TYPES = [
+    ("stock_id", "bigint"), ("market", "market_type"), ("date", "date"),
+    ("summary_tier", "varchar"), ("dimensions", "jsonb"),
+]
+_COLS = [c for c, _ in _COL_TYPES]
+_UNNEST = ", ".join(f"%s::{t}[]" for _, t in _COL_TYPES)
 
 
 class RiskBadgeRepository:
@@ -32,21 +39,21 @@ class RiskBadgeRepository:
     def upsert_batch(self, rows: list[dict]) -> int:
         if not rows:
             return 0
-        values = [
-            (r["stock_id"], r["market"], r["date"], r["summary_tier"],
-             json.dumps(r["dimensions"]))
-            for r in rows
+        cols = [
+            [r["stock_id"] for r in rows],
+            [r["market"] for r in rows],
+            [r["date"] for r in rows],
+            [r["summary_tier"] for r in rows],
+            [json.dumps(r["dimensions"]) for r in rows],
         ]
-        query = """
-            INSERT INTO risk_badges (stock_id, market, date, summary_tier, dimensions)
-            VALUES %s
-            ON CONFLICT (stock_id) DO UPDATE SET
-                market = EXCLUDED.market,
-                date = EXCLUDED.date,
-                summary_tier = EXCLUDED.summary_tier,
-                dimensions = EXCLUDED.dimensions,
-                updated_at = now()
-        """
         with self._conn.cursor() as cur:
-            execute_values(cur, query, values, page_size=2000)
+            cur.execute(
+                f"INSERT INTO risk_badges ({', '.join(_COLS)}) "
+                f"SELECT * FROM UNNEST({_UNNEST}) "
+                "ON CONFLICT (stock_id) DO UPDATE SET "
+                "market = EXCLUDED.market, date = EXCLUDED.date, "
+                "summary_tier = EXCLUDED.summary_tier, "
+                "dimensions = EXCLUDED.dimensions, updated_at = now()",
+                cols,
+            )
             return cur.rowcount
