@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import time
 from contextlib import contextmanager
 from typing import Generator
@@ -14,6 +15,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 _pool: pool.ThreadedConnectionPool | None = None
+_pool_lock = threading.Lock()
 
 _MAX_CONN = int(os.getenv("DB_POOL_MAX_CONN", "10"))
 _RETRY_ATTEMPTS = 3
@@ -23,10 +25,12 @@ _RETRY_BASE_DELAY = 1.0
 def _get_pool() -> pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
-        db_url = os.getenv("SUPABASE_DB_TRANSACTION_POOLER_URL")
-        if not db_url:
-            raise ValueError("SUPABASE_DB_TRANSACTION_POOLER_URL not set")
-        _pool = pool.ThreadedConnectionPool(minconn=1, maxconn=_MAX_CONN, dsn=db_url)
+        with _pool_lock:
+            if _pool is None:
+                db_url = os.getenv("SUPABASE_DB_TRANSACTION_POOLER_URL")
+                if not db_url:
+                    raise ValueError("SUPABASE_DB_TRANSACTION_POOLER_URL not set")
+                _pool = pool.ThreadedConnectionPool(minconn=1, maxconn=_MAX_CONN, dsn=db_url)
     return _pool
 
 
