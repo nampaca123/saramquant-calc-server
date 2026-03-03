@@ -6,6 +6,7 @@ from typing import Generator
 
 import psycopg2
 from psycopg2 import pool
+from psycopg2.pool import PoolError
 from psycopg2.extensions import connection
 from dotenv import load_dotenv
 
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 _pool: pool.ThreadedConnectionPool | None = None
 
-_MAX_CONN = int(os.getenv("DB_POOL_MAX_CONN", "2"))
+_MAX_CONN = int(os.getenv("DB_POOL_MAX_CONN", "10"))
 _RETRY_ATTEMPTS = 3
 _RETRY_BASE_DELAY = 1.0
 
@@ -33,7 +34,7 @@ def _getconn_with_retry() -> connection:
     for attempt in range(_RETRY_ATTEMPTS):
         try:
             return _get_pool().getconn()
-        except psycopg2.OperationalError as e:
+        except (psycopg2.OperationalError, PoolError) as e:
             if attempt == _RETRY_ATTEMPTS - 1:
                 raise
             delay = _RETRY_BASE_DELAY * (2 ** attempt)
