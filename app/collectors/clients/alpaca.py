@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.enums import DataFeed
@@ -21,19 +22,26 @@ class AlpacaClient:
     def fetch_daily_bars(
         self, symbols: list[str], start: date, end: date
     ) -> dict[str, list[dict]]:
+        batches = [
+            symbols[i : i + self.BATCH_SIZE]
+            for i in range(0, len(symbols), self.BATCH_SIZE)
+        ]
+        total = len(batches)
         all_bars: dict[str, list[dict]] = {}
 
-        for i in range(0, len(symbols), self.BATCH_SIZE):
-            batch = symbols[i : i + self.BATCH_SIZE]
-            try:
-                batch_bars = self._fetch_batch_with_fallback(batch, start, end)
-                all_bars.update(batch_bars)
-            except Exception as e:
-                logger.error(f"[Alpaca] Batch request failed: {e}")
-
-            batch_num = i // self.BATCH_SIZE + 1
-            total_batches = (len(symbols) + self.BATCH_SIZE - 1) // self.BATCH_SIZE
-            logger.info(f"[Alpaca] Batch {batch_num}/{total_batches} done ({len(batch)} symbols)")
+        with ThreadPoolExecutor(max_workers=total) as pool:
+            futures = {
+                pool.submit(self._fetch_batch_with_fallback, batch, start, end): idx
+                for idx, batch in enumerate(batches)
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                try:
+                    all_bars.update(future.result())
+                except Exception as e:
+                    logger.error(f"[Alpaca] Batch {idx+1}/{total} failed: {e}")
+                else:
+                    logger.info(f"[Alpaca] Batch {idx+1}/{total} done ({len(batches[idx])} symbols)")
 
         return all_bars
 
