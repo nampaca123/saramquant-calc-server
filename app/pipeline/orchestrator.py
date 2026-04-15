@@ -110,7 +110,16 @@ class PipelineOrchestrator:
         if collect_ms > 0:
             steps.append(StepResult("collection", True, collect_ms))
 
-        if not self._progressive_deactivate(markets):
+        deactivate_start = time.monotonic()
+        deactivate_ok = self._progressive_deactivate(markets)
+        steps.append(StepResult(
+            "progressive_deactivate",
+            deactivate_ok,
+            int((time.monotonic() - deactivate_start) * 1000),
+            None if deactivate_ok else "safety_check_failed",
+        ))
+        if not deactivate_ok:
+            self._log_pipeline_audit(command, steps, pipeline_start)
             return
 
         load_start = time.monotonic()
@@ -137,7 +146,9 @@ class PipelineOrchestrator:
             logger.error("[Pipeline] Fundamentals failed — skipping factors/indicators/risk_badges")
 
         self._run_integrity_check(region)
+        self._log_pipeline_audit(command, steps, pipeline_start)
 
+    def _log_pipeline_audit(self, command: str, steps: list[StepResult], pipeline_start: float) -> None:
         meta = PipelineMetadata(
             command=command,
             steps=steps,
